@@ -13,6 +13,8 @@
 #endif
 
 #include <cmath>
+#include <algorithm>
+#include <cctype>
 #include <borealis/core/application.hpp>
 #include <borealis/core/cache_helper.hpp>
 #include <borealis/core/touch/pan_gesture.hpp>
@@ -116,6 +118,42 @@ unsigned int sceLibcHeapSize             = 24 * 1024 * 1024;
 
 using namespace brls::literals;
 
+#ifdef __linux__
+namespace {
+std::string toLower(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return value;
+}
+
+bool fileContains(const std::string& path, const std::string& keyword) {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+    std::string line;
+    const std::string target = toLower(keyword);
+    while (std::getline(file, line)) {
+        if (toLower(line).find(target) != std::string::npos) return true;
+    }
+    return false;
+}
+
+bool isLegionGoDevice() {
+    bool isLenovo = fileContains("/sys/devices/virtual/dmi/id/sys_vendor", "lenovo");
+    if (!isLenovo) return false;
+    return fileContains("/sys/devices/virtual/dmi/id/product_name", "legion go") ||
+           fileContains("/sys/devices/virtual/dmi/id/product_name", "83e1") ||
+           fileContains("/sys/devices/virtual/dmi/id/product_version", "legion go");
+}
+
+bool isSteamOSRuntime() {
+    if (fileContains("/etc/os-release", "id=steamos") || fileContains("/etc/os-release", "steamos")) return true;
+    const char* desktop = getenv("XDG_CURRENT_DESKTOP");
+    if (desktop && toLower(desktop).find("gamescope") != std::string::npos) return true;
+    return false;
+}
+}  // namespace
+#endif
+
 std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
     /// string
     {SettingItem::CUSTOM_UPDATE_API, {"custom_update_api", {}, {}, 0}},
@@ -147,6 +185,7 @@ std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
     {SettingItem::DLNA_IP, {"dlna_ip", {}, {}, 0}},
     {SettingItem::DLNA_NAME, {"dlna_name", {}, {}, 0}},
     {SettingItem::PLAYER_ASPECT, {"player_aspect", {"-1", "-2", "-3", "4:3", "16:9"}, {}, 0}},
+    {SettingItem::PLAYER_DISK_CACHE_PATH, {"player_disk_cache_path", {}, {}, 0}},
     {SettingItem::HTTP_PROXY, {"http_proxy", {}, {}, 0}},
     {SettingItem::DANMAKU_STYLE_FONT, {"danmaku_style_font", {"stroke", "incline", "shadow", "pure"}, {}, 0}},
     {SettingItem::SHORTCUT_REFRESH, {"shortcut_refresh", {}, {}, 0}},
@@ -1068,6 +1107,25 @@ void ProgramConfig::init() {
 
     // load config from disk
     this->load();
+
+    bool shouldSave = false;
+#ifdef __linux__
+    if (isSteamOSRuntime() && isLegionGoDevice()) {
+        if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_SCALE].key)) {
+            setSettingItem(SettingItem::APP_UI_SCALE, std::string{"900p"}, false);
+            shouldSave = true;
+        }
+        if (!setting.contains(SETTING_MAP[SettingItem::FULLSCREEN].key)) {
+            setSettingItem(SettingItem::FULLSCREEN, true, false);
+            shouldSave = true;
+        }
+    }
+#endif
+    if (!setting.contains(SETTING_MAP[SettingItem::PLAYER_DISK_CACHE_PATH].key)) {
+        setSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, getHomePath() + "/Downloads/wiliwili/cache", false);
+        shouldSave = true;
+    }
+    if (shouldSave) save();
 
     // init custom font path
     brls::FontLoader::USER_FONT_PATH = getConfigDir() + "/font.ttf";

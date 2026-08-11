@@ -58,6 +58,7 @@ private:
     BRLS_BIND(brls::BooleanCell, btnAutoPlay, "setting/video/auto_play");
     BRLS_BIND(brls::BooleanCell, btnAutoFullscreen, "setting/video/auto_fullscreen");
     BRLS_BIND(BiliSelectorCell, selectorInmemory, "setting/video/inmemory");
+    BRLS_BIND(brls::InputCell, btnDiskCachePath, "setting/video/disk_cache_path");
     BRLS_BIND(BiliSelectorCell, selectorFormat, "setting/video/format");
     BRLS_BIND(BiliSelectorCell, selectorCodec, "setting/video/codec");
     BRLS_BIND(BiliSelectorCell, selectorQuality, "setting/audio/quality");

@@ -13,6 +13,8 @@
         "player_bar": "진행 표시줄 항상 표시",
         "low_quality": "낮은 품질의 디코딩(CPU 사용량이 적음)",
         "in_memory_cache": "메모리 캐시",
+        "disk_cache_path": "로컬 비디오 캐시 경로",
+        "disk_cache_path_hint": "기본값: ~/Downloads/wiliwili/cache",
         "hwdec": "하드웨어 디코드",
         "auto_play": "비디오 세부 정보 페이지에서 자동 재생",
         "auto_fullscreen": "플레이어 진입 시 자동 전체 화면",
