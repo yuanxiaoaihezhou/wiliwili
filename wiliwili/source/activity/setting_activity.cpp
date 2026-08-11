@@ -646,6 +646,20 @@ void SettingActivity::onContentAvailable() {
                                MPVCore::instance().restart();
                            });
 
+    auto defaultDiskCachePath = conf.getHomePath() + "/Downloads/wiliwili/cache";
+    auto diskCachePath =
+        conf.getSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, defaultDiskCachePath);
+    btnDiskCachePath->init(
+        "wiliwili/setting/app/playback/disk_cache_path"_i18n, diskCachePath,
+        [defaultDiskCachePath](const std::string& data) {
+            std::string cachePath = pystring::strip(data);
+            if (cachePath.empty()) cachePath = defaultDiskCachePath;
+            ProgramConfig::instance().setSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, cachePath);
+            MPVCore::instance().restart();
+        },
+        "wiliwili/setting/app/playback/disk_cache_path_hint"_i18n,
+        "wiliwili/setting/app/playback/disk_cache_path_hint"_i18n, 256);
+
     /// TLS verify
     btnTls->init("wiliwili/setting/app/network/tls"_i18n, conf.getBoolOption(SettingItem::TLS_VERIFY), [](bool data) {
         auto& conf = ProgramConfig::instance();

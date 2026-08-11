@@ -13,6 +13,8 @@
         "player_bar": "プログレスバー常に表示すん",
         "low_quality": "低品質ぬデコード (CPU使用率がふぃくくなやびーん)",
         "in_memory_cache": "インメモリキャッシュ",
+        "disk_cache_path": "ローカル動画キャッシュパス",
+        "disk_cache_path_hint": "デフォルト: ~/Downloads/wiliwili/cache",
         "hwdec": "ハードウェアデコード",
         "auto_fullscreen": "動画プレーヤーに入る時に自動的に全画面表示",
         "auto_play": "動画詳細ページで自動再生",

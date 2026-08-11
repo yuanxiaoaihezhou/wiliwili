@@ -55,6 +55,9 @@
                             <SelectorCell
                                     id="setting/video/inmemory"/>
 
+                            <brls:InputCell
+                                    id="setting/video/disk_cache_path"/>
+
                         </brls:Box>
                         <brls:Header
                                 width="auto"

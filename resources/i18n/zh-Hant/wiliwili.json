@@ -13,6 +13,8 @@
         "player_bar": "下方固定顯示進度條",
         "low_quality": "低畫質解碼（以畫質為代價換取更低的功耗）",
         "in_memory_cache": "解码緩存",
+        "disk_cache_path": "本地影片快取路徑",
+        "disk_cache_path_hint": "預設: ~/Downloads/wiliwili/cache",
         "hwdec": "硬體解碼",
         "auto_play": "影片詳細頁直接播放",
         "auto_fullscreen": "進入播放頁後自動全屏",

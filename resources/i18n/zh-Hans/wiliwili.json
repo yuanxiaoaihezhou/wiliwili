@@ -13,6 +13,8 @@
         "player_bar": "下方固定显示进度条",
         "low_quality": "低画质解码（以画质为代价换取更低的功耗）",
         "in_memory_cache": "解码缓存",
+        "disk_cache_path": "本地视频缓存路径",
+        "disk_cache_path_hint": "默认: ~/Downloads/wiliwili/cache",
         "hwdec": "硬件解码",
         "auto_play": "视频详情页直接播放",
         "auto_fullscreen": "进入播放页后自动全屏",
