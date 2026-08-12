@@ -46,6 +46,10 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
+    // MPV events are available after Borealis initialization. Downloads use them to apply a
+    // gentler background speed limit while the user is actively watching a video.
+    DownloadManager::instance().initRuntimeHooks();
+
     // Return directly to the desktop when closing the application (only for NX)
     brls::Application::getPlatform()->exitToHomeMode(true);
 

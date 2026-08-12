@@ -180,6 +180,7 @@ std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
     {SettingItem::APP_THEME, {"app_theme", {"auto", "light", "dark"}, {}, 0}},
     {SettingItem::APP_RESOURCES, {"app_resources", {}, {}, 0}},
     {SettingItem::APP_UI_SCALE, {"app_ui_scale", {"544p", "720p", "800p", "900p", "1080p"}, {}, WILI_UI_SCALE_DEFAULT}},
+    {SettingItem::APP_UI_PROFILE, {"app_ui_profile", {"auto", "desktop", "tv", "handheld"}, {}, 0}},
     {SettingItem::KEYMAP, {"keymap", {"xbox", "ps", "keyboard"}, {}, 0}},
     {SettingItem::HOME_WINDOW_STATE, {"home_window_state", {}, {}, 0}},
     {SettingItem::DLNA_IP, {"dlna_ip", {}, {}, 0}},
@@ -187,6 +188,12 @@ std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
     {SettingItem::PLAYER_ASPECT, {"player_aspect", {"-1", "-2", "-3", "4:3", "16:9"}, {}, 0}},
     {SettingItem::VIDEO_DOWNLOAD_PATH, {"video_download_path", {}, {}, 0}},
     {SettingItem::DOWNLOAD_SPEED_LIMIT, {"download_speed_limit", {}, {}, 0}},
+    {SettingItem::DOWNLOAD_PLAYBACK_SPEED_LIMIT, {"download_playback_speed_limit", {}, {}, 0}},
+    {SettingItem::DOWNLOAD_CONCURRENCY, {"download_concurrency", {}, {}, 0}},
+    {SettingItem::DOWNLOAD_VIDEO_CODEC, {"download_video_codec", {"auto", "avc", "hevc", "av1"}, {}, 0}},
+    {SettingItem::DOWNLOAD_COVER, {"download_cover", {}, {}, 1}},
+    {SettingItem::DOWNLOAD_DANMAKU, {"download_danmaku", {}, {}, 1}},
+    {SettingItem::DOWNLOAD_SUBTITLES, {"download_subtitles", {}, {}, 1}},
     {SettingItem::HTTP_PROXY, {"http_proxy", {}, {}, 0}},
     {SettingItem::DANMAKU_STYLE_FONT, {"danmaku_style_font", {"stroke", "incline", "shadow", "pure"}, {}, 0}},
     {SettingItem::SHORTCUT_REFRESH, {"shortcut_refresh", {}, {}, 0}},
@@ -544,9 +551,17 @@ void ProgramConfig::load() {
     }
 
 #ifdef __linux__
-    // Legion Go's panel is 16:10. Apply handheld defaults before layout initialization so they
-    // take effect on the first launch instead of only after the next restart.
-    if (isSteamOSRuntime() && isLegionGoDevice()) {
+    // Resolve an explicit UI profile before layout initialization. Legion Go + SteamOS/gamescope
+    // defaults to the handheld profile, while users can still override it later.
+    if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_PROFILE].key) && isSteamOSRuntime() && isLegionGoDevice()) {
+        setSettingItem(SettingItem::APP_UI_PROFILE, std::string{"handheld"}, false);
+        migratedConfig = true;
+    }
+    const auto uiProfile = getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
+    const bool handheldProfile = uiProfile == "handheld" ||
+        (uiProfile == "auto" && isSteamOSRuntime() && isLegionGoDevice());
+    const bool tvProfile = uiProfile == "tv";
+    if (handheldProfile) {
         if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_SCALE].key)) {
             setSettingItem(SettingItem::APP_UI_SCALE, std::string{"800p"}, false);
             migratedConfig = true;
@@ -563,6 +578,9 @@ void ProgramConfig::load() {
             setSettingItem(SettingItem::KEYMAP, std::string{"xbox"}, false);
             migratedConfig = true;
         }
+    } else if (tvProfile && !setting.contains(SETTING_MAP[SettingItem::PLAYER_OSD_TV_MODE].key)) {
+        setSettingItem(SettingItem::PLAYER_OSD_TV_MODE, true, false);
+        migratedConfig = true;
     }
 #endif
     if (migratedConfig) save();

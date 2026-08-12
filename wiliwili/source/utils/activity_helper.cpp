@@ -104,6 +104,7 @@ void Intent::openInbox() {
 }
 
 void Intent::openDownloadManager() { brls::Application::pushActivity(new DownloadActivity()); }
+void Intent::openOfflineLibrary() { brls::Application::pushActivity(new OfflineLibraryActivity()); }
 
 void Intent::openHint() { brls::Application::pushActivity(new HintActivity()); }
 

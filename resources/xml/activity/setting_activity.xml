@@ -151,6 +151,8 @@
 
                             <SelectorCell
                                     id="setting/ui/scale"/>
+                            <SelectorCell
+                                    id="setting/ui/profile"/>
 
                         </brls:Box>
                         <brls:Header
@@ -380,8 +382,16 @@
                                 marginBottom="30px">
                             <brls:RadioCell id="tools/download_manager"
                                     title="@i18n/wiliwili/setting/tools/download/manager"/>
+                            <brls:RadioCell id="tools/offline_library"
+                                    title="@i18n/wiliwili/download_manager/offline_library"/>
                             <brls:InputCell id="tools/download_dir"/>
                             <brls:InputCell id="tools/download_speed"/>
+                            <brls:InputCell id="tools/download_playback_speed"/>
+                            <brls:InputCell id="tools/download_concurrency"/>
+                            <SelectorCell id="tools/download_codec"/>
+                            <brls:BooleanCell id="tools/download_cover"/>
+                            <brls:BooleanCell id="tools/download_danmaku"/>
+                            <brls:BooleanCell id="tools/download_subtitles"/>
                         </brls:Box>
                         <brls:Header
                                 width="auto"

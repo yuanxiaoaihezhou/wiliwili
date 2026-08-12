@@ -34,6 +34,7 @@ public:
 
     // 开启下载管理中心
     static void openDownloadManager();
+    static void openOfflineLibrary();
 
     // switch 应用开启教程
     static void openHint();

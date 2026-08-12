@@ -13,6 +13,13 @@
                     text="@i18n/wiliwili/download_manager/title"
                     fontSize="26"
                     grow="1"/>
+            <brls:Label
+                    id="download/summary"
+                    fontSize="14"
+                    textColor="@theme/font/grey"
+                    horizontalAlign="right"
+                    singleLine="true"
+                    width="55%"/>
         </brls:Box>
         <brls:Label
                 text="@i18n/wiliwili/download_manager/hint"

@@ -24,7 +24,7 @@ on:
       - 'v*'
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: appimage-${{ github.workflow }}-${{ github.ref }}
@@ -54,6 +54,7 @@ jobs:
             build-essential \
             cmake \
             ninja-build \
+            ccache \
             pkg-config \
             libssl-dev \
             libcurl4-openssl-dev \
@@ -79,7 +80,24 @@ jobs:
             ffmpeg \
             file \
             patchelf \
-            wget
+            wget \
+            zsync
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-appimage-ccache-${{ github.ref_name }}-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-appimage-ccache-${{ github.ref_name }}-
+            ${{ runner.os }}-appimage-ccache-
+
+      - name: Configure compiler cache
+        shell: bash
+        run: |
+          echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache" >> "${GITHUB_ENV}"
+          ccache --max-size=1G
+          ccache --zero-stats
 
       - name: Update gamepad mappings
         run: |
@@ -117,6 +135,8 @@ jobs:
             -DGLFW_BUILD_X11=ON \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBRLS_UNITY_BUILD="${UNITY_BUILD}" \
             -DCMAKE_UNITY_BUILD_BATCH_SIZE=16 \
             -DVERSION_BUILD='${{ github.run_number }}' \
@@ -164,9 +184,19 @@ jobs:
       - name: Bundle runtime and create AppImage
         shell: bash
         run: |
+          set -euxo pipefail
           # Keep the native Linux build un-sandboxed so SteamOS can use the host's
           # Mesa/VA-API stack. linuxdeploy bundles ordinary shared libraries, while
           # GPU drivers remain supplied by the host.
+          VERSION="$(git describe --tags --always | tr '/ ' '--')"
+          OUTPUT="wiliwili-Linux-x86_64-${VERSION}.AppImage"
+          OWNER="${GITHUB_REPOSITORY%%/*}"
+          REPO="${GITHUB_REPOSITORY#*/}"
+          export ARCH=x86_64
+          export LDAI_OUTPUT="${OUTPUT}"
+          export LDAI_VERSION="${VERSION}"
+          export LDAI_UPDATE_INFORMATION="gh-releases-zsync|${OWNER}|${REPO}|latest|wiliwili-Linux-x86_64-*.AppImage.zsync"
+
           ./linuxdeploy-x86_64.AppImage \
             --appdir "${APPDIR}" \
             --executable "${APPDIR}/usr/bin/wiliwili" \
@@ -175,12 +205,8 @@ jobs:
             --icon-file resources/svg/cn.xfangfang.wiliwili.svg \
             --output appimage
 
-          APPIMAGE="$(find . -maxdepth 1 -type f -name '*.AppImage' ! -name 'linuxdeploy-*.AppImage' -print -quit)"
-          test -n "${APPIMAGE}"
-
-          VERSION="$(git describe --tags --always --dirty | tr '/ ' '--')"
-          OUTPUT="wiliwili-Linux-x86_64-${VERSION}.AppImage"
-          mv "${APPIMAGE}" "${OUTPUT}"
+          test -s "${OUTPUT}"
+          test -s "${OUTPUT}.zsync"
           chmod +x "${OUTPUT}"
           sha256sum "${OUTPUT}" > "${OUTPUT}.sha256"
           echo "APPIMAGE_OUTPUT=${OUTPUT}" >> "${GITHUB_ENV}"
@@ -194,6 +220,10 @@ jobs:
           test -x squashfs-root/usr/bin/ffmpeg
           test -f squashfs-root/cn.xfangfang.wiliwili.desktop
           test -f squashfs-root/cn.xfangfang.wiliwili.svg
+          LD_LIBRARY_PATH="${PWD}/squashfs-root/usr/lib:${PWD}/squashfs-root/usr/lib/x86_64-linux-gnu" \
+            ldd squashfs-root/usr/bin/wiliwili | tee appimage-ldd.txt
+          ! grep -q 'not found' appimage-ldd.txt
+          squashfs-root/usr/bin/ffmpeg -version | head -n 1
           file "${APPIMAGE_OUTPUT}"
           du -h "${APPIMAGE_OUTPUT}"
           cat "${APPIMAGE_OUTPUT}.sha256"
@@ -205,6 +235,21 @@ jobs:
           path: |
             ${{ env.APPIMAGE_OUTPUT }}
             ${{ env.APPIMAGE_OUTPUT }}.sha256
+            ${{ env.APPIMAGE_OUTPUT }}.zsync
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      - name: Compiler cache statistics
+        if: always()
+        run: ccache --show-stats || true
+
+      - name: Publish tagged AppImage release
+        if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
+        uses: softprops/action-gh-release@v3
+        with:
+          generate_release_notes: true
+          files: |
+            ${{ env.APPIMAGE_OUTPUT }}
+            ${{ env.APPIMAGE_OUTPUT }}.sha256
+            ${{ env.APPIMAGE_OUTPUT }}.zsync

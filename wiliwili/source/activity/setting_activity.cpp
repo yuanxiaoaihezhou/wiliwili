@@ -2,7 +2,10 @@
 // Created by fang on 2022/8/22.
 //
 
+#include <algorithm>
+#include <memory>
 #include <pystring.h>
+#include <cpr/filesystem.h>
 #include <borealis/core/i18n.hpp>
 #include <borealis/core/application.hpp>
 #include <borealis/core/cache_helper.hpp>
@@ -218,13 +221,27 @@ void SettingActivity::onContentAvailable() {
         Intent::openDownloadManager();
         return true;
     });
+    btnOfflineLibrary->registerClickAction([](...) -> bool {
+        Intent::openOfflineLibrary();
+        return true;
+    });
 
     auto downloadDir = DownloadManager::defaultDownloadDir();
+    auto downloadDirSetting = std::make_shared<std::string>(
+        ProgramConfig::instance().getSettingItem(SettingItem::VIDEO_DOWNLOAD_PATH, std::string{}));
     btnDownloadDir->init(
         "wiliwili/setting/tools/download/dir"_i18n, downloadDir,
-        [](const std::string& data) {
+        [downloadDirSetting](const std::string& data) {
             std::string path = pystring::strip(data);
+            const std::string previous = *downloadDirSetting;
             ProgramConfig::instance().setSettingItem(SettingItem::VIDEO_DOWNLOAD_PATH, path);
+            try {
+                cpr::fs::create_directories(DownloadManager::defaultDownloadDir());
+                *downloadDirSetting = path;
+            } catch (...) {
+                ProgramConfig::instance().setSettingItem(SettingItem::VIDEO_DOWNLOAD_PATH, previous);
+                brls::Application::notify("wiliwili/setting/tools/download/dir_invalid"_i18n);
+            }
         },
         "wiliwili/setting/tools/download/dir_hint"_i18n,
         "wiliwili/setting/tools/download/dir_hint"_i18n, 512);
@@ -246,6 +263,53 @@ void SettingActivity::onContentAvailable() {
         },
         "wiliwili/setting/tools/download/speed_hint"_i18n,
         "wiliwili/setting/tools/download/speed_hint"_i18n, 32);
+
+    auto playbackSpeedLimit = ProgramConfig::instance().getSettingItem(SettingItem::DOWNLOAD_PLAYBACK_SPEED_LIMIT, std::string{"5"});
+    btnDownloadPlaybackSpeed->init(
+        "wiliwili/setting/tools/download/playback_speed"_i18n, playbackSpeedLimit,
+        [](const std::string& data) {
+            std::string value = pystring::strip(data);
+            if (value.empty()) value = "0";
+            try { if (std::stod(value) < 0) value = "0"; }
+            catch (...) { brls::Application::notify("wiliwili/setting/tools/download/speed_invalid"_i18n); return; }
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_PLAYBACK_SPEED_LIMIT, value);
+        },
+        "wiliwili/setting/tools/download/playback_speed_hint"_i18n,
+        "wiliwili/setting/tools/download/playback_speed_hint"_i18n, 32);
+
+    auto concurrency = ProgramConfig::instance().getSettingItem(SettingItem::DOWNLOAD_CONCURRENCY, std::string{"2"});
+    btnDownloadConcurrency->init(
+        "wiliwili/setting/tools/download/concurrency"_i18n, concurrency,
+        [](const std::string& data) {
+            try {
+                int value = std::stoi(pystring::strip(data));
+                value = std::max(1, std::min(4, value));
+                ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_CONCURRENCY, std::to_string(value));
+            } catch (...) { brls::Application::notify("wiliwili/setting/tools/download/concurrency_invalid"_i18n); }
+        },
+        "wiliwili/setting/tools/download/concurrency_hint"_i18n,
+        "wiliwili/setting/tools/download/concurrency_hint"_i18n, 4);
+
+    static int downloadCodecIndex = ProgramConfig::instance().getStringOptionIndex(SettingItem::DOWNLOAD_VIDEO_CODEC);
+    selectorDownloadCodec->init(
+        "wiliwili/setting/tools/download/codec"_i18n,
+        {"wiliwili/setting/tools/download/codec_auto"_i18n, "AVC / H.264", "HEVC / H.265", "AV1"},
+        downloadCodecIndex, [](int data) {
+            downloadCodecIndex = data;
+            auto optionData = ProgramConfig::instance().getOptionData(SettingItem::DOWNLOAD_VIDEO_CODEC);
+            if (data >= 0 && static_cast<size_t>(data) < optionData.optionList.size())
+                ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_VIDEO_CODEC, optionData.optionList[data]);
+            return true;
+        });
+    btnDownloadCover->init("wiliwili/setting/tools/download/cover"_i18n,
+        ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_COVER),
+        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_COVER, value); });
+    btnDownloadDanmaku->init("wiliwili/setting/tools/download/danmaku"_i18n,
+        ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_DANMAKU),
+        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_DANMAKU, value); });
+    btnDownloadSubtitles->init("wiliwili/setting/tools/download/subtitles"_i18n,
+        ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_SUBTITLES),
+        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_SUBTITLES, value); });
 
     btnTutorialFont->registerClickAction([](...) -> bool {
         auto dialog =
@@ -531,6 +595,30 @@ void SettingActivity::onContentAvailable() {
                               return true;
                           });
 
+    // UI profile: layout intent is separate from physical render resolution. Handheld keeps
+    // 16:10-friendly 800p layout sizing while the framebuffer can stay at the system resolution.
+    static int uiProfileIndex = conf.getStringOptionIndex(SettingItem::APP_UI_PROFILE);
+    selectorUIProfile->init(
+        "wiliwili/setting/app/others/profile/header"_i18n,
+        {"wiliwili/setting/app/others/profile/auto"_i18n,
+         "wiliwili/setting/app/others/profile/desktop"_i18n,
+         "wiliwili/setting/app/others/profile/tv"_i18n,
+         "wiliwili/setting/app/others/profile/handheld"_i18n},
+        uiProfileIndex, [](int data) {
+            if (uiProfileIndex == data) return false;
+            uiProfileIndex = data;
+            auto optionData = ProgramConfig::instance().getOptionData(SettingItem::APP_UI_PROFILE);
+            ProgramConfig::instance().setSettingItem(SettingItem::APP_UI_PROFILE, optionData.optionList[data]);
+            if (optionData.optionList[data] == "handheld") {
+                // Handheld is a logical 16:10 layout profile. It does not force the physical
+                // framebuffer resolution; gamescope/SteamOS remains free to render at 800/1200/1600p.
+                ProgramConfig::instance().setSettingItem(SettingItem::APP_UI_SCALE, std::string{"800p"});
+                ProgramConfig::instance().setSettingItem(SettingItem::PLAYER_OSD_TV_MODE, true);
+            }
+            DialogHelper::quitApp();
+            return true;
+        });
+
     /// App Keymap
 #if !defined(__SWITCH__) && !defined(__PSV__) && !defined(PS4)
     static int keyIndex = conf.getStringOptionIndex(SettingItem::KEYMAP);
@@ -756,7 +844,7 @@ void SettingActivity::onContentAvailable() {
     const std::vector<int> counts = {0, 10, 25, 50, 100};
     // 默认选择索引
     int sidebarIndex = 4; // 默认100条
-    
+
     // 根据保存的实际值找到对应的索引
     for (size_t i = 0; i < counts.size(); i++) {
         if (sidebarCount == counts[i]) {
@@ -764,7 +852,7 @@ void SettingActivity::onContentAvailable() {
             break;
         }
     }
-    
+
     this->selectorLiveSidebarCount->init(
         "wiliwili/setting/app/ui/live_sidebar_count"_i18n,
         {"0 ("_i18n + "wiliwili/setting/app/ui/live_sidebar_hide"_i18n + ")", "10", "25", "50", "100"},

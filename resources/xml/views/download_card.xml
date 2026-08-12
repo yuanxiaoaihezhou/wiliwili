@@ -1,6 +1,7 @@
 <brls:Box
         focusable="true"
         wireframe="false"
+        highlightCornerRadius="12"
         axis="row"
         width="100%"
         height="118"

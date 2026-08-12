@@ -1,0 +1,7 @@
+<brls:AppletFrame iconInterpolation="linear" headerHidden="true" footerHidden="false">
+    <brls:Box backgroundColor="@theme/brls/background" axis="column" grow="1">
+        <brls:Label id="offline/title" height="54" marginLeft="24" marginRight="70" fontSize="22" singleLine="true"/>
+        <VideoView id="offline/video" focusable="true" grow="1" width="100%" height="auto"/>
+        <ButtonClose positionType="absolute" positionTop="2" positionRight="2"/>
+    </brls:Box>
+</brls:AppletFrame>

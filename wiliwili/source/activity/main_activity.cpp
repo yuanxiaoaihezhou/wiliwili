@@ -19,9 +19,12 @@
 #include "activity/main_activity.hpp"
 #include "utils/activity_helper.hpp"
 #include "utils/dialog_helper.hpp"
+#include "utils/config_helper.hpp"
 #include "view/custom_button.hpp"
 #include "view/auto_tab_frame.hpp"
 #include "view/svg_image.hpp"
+
+using namespace brls::literals;
 
 MainActivity::~MainActivity() { brls::Logger::debug("del MainActivity"); }
 
@@ -41,6 +44,19 @@ void MainActivity::onContentAvailable() {
             return true;
         },
         true);
+
+    // Handheld shortcut: Y opens downloads from the home screen. In the player, Y is
+    // contextually reserved for downloading the current video instead.
+    const auto uiProfile = ProgramConfig::instance().getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
+    if (uiProfile == "handheld") {
+        this->registerAction(
+            "wiliwili/download_manager/title"_i18n, brls::ControllerButton::BUTTON_Y,
+            [](brls::View*) -> bool {
+                Intent::openDownloadManager();
+                return true;
+            },
+            true);
+    }
 
     this->settingBtn->registerClickAction([](brls::View* view) -> bool {
         Intent::openSetting();

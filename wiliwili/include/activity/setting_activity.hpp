@@ -40,8 +40,15 @@ private:
     BRLS_BIND(brls::RadioCell, btnQuit, "tools/quit");
     BRLS_BIND(brls::RadioCell, btnOpenConfig, "tools/config_dir");
     BRLS_BIND(brls::RadioCell, btnDownloadManager, "tools/download_manager");
+    BRLS_BIND(brls::RadioCell, btnOfflineLibrary, "tools/offline_library");
     BRLS_BIND(brls::InputCell, btnDownloadDir, "tools/download_dir");
     BRLS_BIND(brls::InputCell, btnDownloadSpeed, "tools/download_speed");
+    BRLS_BIND(brls::InputCell, btnDownloadPlaybackSpeed, "tools/download_playback_speed");
+    BRLS_BIND(brls::InputCell, btnDownloadConcurrency, "tools/download_concurrency");
+    BRLS_BIND(BiliSelectorCell, selectorDownloadCodec, "tools/download_codec");
+    BRLS_BIND(brls::BooleanCell, btnDownloadCover, "tools/download_cover");
+    BRLS_BIND(brls::BooleanCell, btnDownloadDanmaku, "tools/download_danmaku");
+    BRLS_BIND(brls::BooleanCell, btnDownloadSubtitles, "tools/download_subtitles");
     BRLS_BIND(brls::RadioCell, btnVibrationTest, "tools/vibration_test");
     BRLS_BIND(brls::RadioCell, btnDLNA, "tools/dlna");
     BRLS_BIND(brls::BooleanCell, btnTls, "setting/network/tls");
@@ -51,6 +58,7 @@ private:
     BRLS_BIND(BiliSelectorCell, selectorTheme, "setting/ui/theme");
     BRLS_BIND(BiliSelectorCell, selectorCustomTheme, "setting/custom/theme");
     BRLS_BIND(BiliSelectorCell, selectorUIScale, "setting/ui/scale");
+    BRLS_BIND(BiliSelectorCell, selectorUIProfile, "setting/ui/profile");
     BRLS_BIND(BiliSelectorCell, selectorTexture, "setting/image/texture");
     BRLS_BIND(BiliSelectorCell, selectorThreads, "setting/image/threads");
     BRLS_BIND(BiliSelectorCell, selectorKeymap, "setting/keymap");

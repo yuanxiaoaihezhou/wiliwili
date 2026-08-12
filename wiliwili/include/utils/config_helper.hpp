@@ -36,6 +36,7 @@ enum class SettingItem {
     APP_LANG,       // 应用语言
     APP_RESOURCES,  // 自定义界面布局
     APP_UI_SCALE,   // 界面缩放
+    APP_UI_PROFILE, // auto / desktop / tv / handheld
     APP_SWAP_ABXY,  // A-B 交换 和 X-Y 交换
     SCROLL_SPEED,   // 列表滑动速度
     HISTORY_REPORT,
@@ -48,6 +49,12 @@ enum class SettingItem {
     PLAYER_INMEMORY_CACHE,
     VIDEO_DOWNLOAD_PATH,
     DOWNLOAD_SPEED_LIMIT,
+    DOWNLOAD_PLAYBACK_SPEED_LIMIT,
+    DOWNLOAD_CONCURRENCY,
+    DOWNLOAD_VIDEO_CODEC,
+    DOWNLOAD_COVER,
+    DOWNLOAD_DANMAKU,
+    DOWNLOAD_SUBTITLES,
     PLAYER_HWDEC,
     PLAYER_HWDEC_CUSTOM,
     PLAYER_EXIT_FULLSCREEN_ON_END,
