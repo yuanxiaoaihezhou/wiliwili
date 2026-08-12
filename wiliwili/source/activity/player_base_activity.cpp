@@ -672,7 +672,7 @@ void BasePlayerActivity::showDownloadDialog() {
             };
             if (base.is_pgc) {
                 BILI::get_season_url(base.cid, quality,
-                    [success](const bilibili::SeasonUrlResult& result) { success(result.video_info); }, failure);
+                    [success](const bilibili::SeasonUrlResult& result) mutable { success(result.video_info); }, failure);
             } else {
                 BILI::get_video_url(base.bvid, base.cid, quality, success, failure);
             }
