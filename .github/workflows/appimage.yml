@@ -57,17 +57,22 @@ jobs:
             pkg-config \
             libssl-dev \
             libcurl4-openssl-dev \
+            libdbus-1-dev \
             libmpv-dev \
             libwebp-dev \
             libgl1-mesa-dev \
             libegl1-mesa-dev \
             libx11-dev \
+            libxext-dev \
+            libxfixes-dev \
             libxrandr-dev \
             libxinerama-dev \
             libxcursor-dev \
             libxi-dev \
             libwayland-dev \
+            wayland-protocols \
             libxkbcommon-dev \
+            libxkbcommon-x11-dev \
             libasound2-dev \
             libpulse-dev \
             desktop-file-utils \
@@ -83,9 +88,21 @@ jobs:
             "${BRLS_GLFW}/src/mappings.h.in" \
             "${BRLS_GLFW}/src/mappings.h"
 
+      - name: Verify native dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          pkg-config --modversion dbus-1
+          pkg-config --modversion libmpv
+          pkg-config --modversion libwebp
+          pkg-config --modversion libcurl
+          pkg-config --modversion wayland-client
+          pkg-config --modversion xkbcommon
+
       - name: Configure
         shell: bash
         run: |
+          set -o pipefail
           UNITY_BUILD=ON
           if [[ '${{ github.event.inputs.disable_unity_build }}' == 'true' ]]; then
             UNITY_BUILD=OFF
@@ -98,12 +115,36 @@ jobs:
             -DUSE_SYSTEM_CURL=ON \
             -DGLFW_BUILD_WAYLAND=ON \
             -DGLFW_BUILD_X11=ON \
-            -DUSE_EGL=ON \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DBRLS_UNITY_BUILD="${UNITY_BUILD}" \
             -DCMAKE_UNITY_BUILD_BATCH_SIZE=16 \
-            -DVERSION_BUILD='${{ github.run_number }}'
+            -DVERSION_BUILD='${{ github.run_number }}' \
+            2>&1 | tee cmake-configure.log
+
+      - name: Show configure diagnostics
+        if: failure()
+        shell: bash
+        run: |
+          echo "===== cmake-configure.log ====="
+          cat cmake-configure.log 2>/dev/null || true
+          echo "===== CMakeError.log ====="
+          cat build-appimage/CMakeFiles/CMakeError.log 2>/dev/null || true
+          echo "===== CMakeOutput.log (tail) ====="
+          tail -n 200 build-appimage/CMakeFiles/CMakeOutput.log 2>/dev/null || true
+
+      - name: Upload configure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: appimage-configure-diagnostics-${{ github.run_number }}
+          path: |
+            cmake-configure.log
+            build-appimage/CMakeCache.txt
+            build-appimage/CMakeFiles/CMakeError.log
+            build-appimage/CMakeFiles/CMakeOutput.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Build and stage AppDir
         run: |
