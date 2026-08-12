@@ -46,15 +46,16 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    // MPV events are available after Borealis initialization. Downloads use them to apply a
-    // gentler background speed limit while the user is actively watching a video.
-    DownloadManager::instance().initRuntimeHooks();
-
     // Return directly to the desktop when closing the application (only for NX)
     brls::Application::getPlatform()->exitToHomeMode(true);
 
     brls::Application::createWindow("wiliwili");
     brls::Logger::info("createWindow done");
+
+    // MPV_E lazily constructs MPVCore. Do this only AFTER createWindow(), when GLFW has a current
+    // OpenGL context. Initializing it earlier caused SteamOS/AppImage to abort with GLFW 65538 and
+    // "failed to initialize mpv GL context" before the first window appeared.
+    DownloadManager::instance().initRuntimeHooks();
 
     // Register custom view\theme\style
     Register::initCustomView();
@@ -107,6 +108,10 @@ int main(int argc, char* argv[]) {
     }
 
     brls::Logger::info("mainLoop done");
+
+    // Stop and join download workers while Borealis/mpv and ProgramConfig are still alive. Active
+    // downloads become PAUSED and keep their validated partial files for the next launch.
+    DownloadManager::instance().shutdown();
 
     // Cleanup curl and Check whether restart is required
     ProgramConfig::instance().exit(argv);

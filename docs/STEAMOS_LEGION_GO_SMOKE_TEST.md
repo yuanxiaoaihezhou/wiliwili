@@ -11,7 +11,7 @@ Run this checklist on a real Legion Go Z1 Extreme after major download/player/Ap
 - [ ] X11 session works.
 - [ ] Wayland/gamescope session works.
 - [ ] VA-API/hardware decoding works for a normal video.
-- [ ] Bundled `ffmpeg` is found by the downloader.
+- [ ] Bundled `ffmpeg` and `ffprobe` are found by the downloader.
 
 ## Handheld UI
 
@@ -56,6 +56,8 @@ Run this checklist on a real Legion Go Z1 Extreme after major download/player/Ap
 - [ ] Disable Wi-Fi during transfer; reconnect and retry resumes with refreshed CDN URL.
 - [ ] Suspend SteamOS during transfer; wake and task recovers/retries without corrupting media.
 - [ ] CDN ignoring HTTP Range never causes duplicated bytes.
+- [ ] A mismatched `Content-Range` is rejected and the affected track restarts safely.
+- [ ] A deliberately corrupted completed/partial media file is renamed to `.corrupt`; Retry redownloads it rather than failing forever on the same file.
 
 ## Offline extras / metadata
 
@@ -68,7 +70,7 @@ Run this checklist on a real Legion Go Z1 Extreme after major download/player/Ap
 
 ## Download Manager / Offline Library
 
-- [ ] Stage text follows source -> space -> video -> audio -> mux -> extras -> complete.
+- [ ] Stage text follows source -> space -> video -> audio -> mux -> verify -> extras -> complete.
 - [ ] Pause / Resume / Retry / Cancel work.
 - [ ] Move Up / Move Down changes pending queue order.
 - [ ] Configured concurrency 1-4 is respected.
@@ -87,7 +89,16 @@ Run this checklist on a real Legion Go Z1 Extreme after major download/player/Ap
 - [ ] `yoga` push builds an AppImage artifact.
 - [ ] `.sha256` matches the AppImage.
 - [ ] `.zsync` is generated.
-- [ ] Extracted AppImage contains `usr/bin/wiliwili` and `usr/bin/ffmpeg`.
+- [ ] Extracted AppImage contains `usr/bin/wiliwili`, `usr/bin/ffmpeg`, and `usr/bin/ffprobe`.
 - [ ] `ldd` check has no `not found` entries.
 - [ ] `v*` tag creates/updates a GitHub Release with AppImage, SHA256, and zsync files.
 - [ ] ccache reports hits on a subsequent related build.
+
+
+## AppImage startup regression
+
+- Launch the generated AppImage from SteamOS Desktop Mode and from Game Mode.
+- Confirm a window appears and playback can initialize.
+- The terminal/log must **not** contain `GLFW 65538: Cannot query entry point without a current OpenGL or OpenGL ES context`.
+- The terminal/log must **not** contain `failed to initialize mpv GL context`.
+- Quit while a download is active; relaunch and verify the task is PAUSED with its validated partial data preserved.

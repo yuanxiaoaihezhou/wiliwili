@@ -145,6 +145,25 @@ bool isLegionGoDevice() {
            fileContains("/sys/devices/virtual/dmi/id/product_version", "legion go");
 }
 
+bool isSteamDeckDevice() {
+    const bool valve = fileContains("/sys/devices/virtual/dmi/id/sys_vendor", "valve") ||
+                       fileContains("/sys/class/dmi/id/sys_vendor", "valve");
+    if (!valve) return false;
+    return fileContains("/sys/devices/virtual/dmi/id/product_name", "jupiter") ||
+           fileContains("/sys/devices/virtual/dmi/id/product_name", "galileo") ||
+           fileContains("/sys/class/dmi/id/product_name", "jupiter") ||
+           fileContains("/sys/class/dmi/id/product_name", "galileo") ||
+           fileContains("/sys/devices/virtual/dmi/id/product_name", "steam deck") ||
+           fileContains("/sys/class/dmi/id/product_name", "steam deck");
+}
+
+bool isKnownHandheldDevice() {
+    // Keep device-specific knowledge behind one capability check. Legion Go remains explicitly
+    // supported while Steam Deck can use the same 16:10 handheld profile without adding a second
+    // set of layout rules. Future handheld DMI rules belong here rather than in UI code.
+    return isLegionGoDevice() || isSteamDeckDevice();
+}
+
 bool isSteamOSRuntime() {
     if (fileContains("/etc/os-release", "id=steamos") || fileContains("/etc/os-release", "steamos")) return true;
     const char* desktop = getenv("XDG_CURRENT_DESKTOP");
@@ -194,6 +213,7 @@ std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
     {SettingItem::DOWNLOAD_COVER, {"download_cover", {}, {}, 1}},
     {SettingItem::DOWNLOAD_DANMAKU, {"download_danmaku", {}, {}, 1}},
     {SettingItem::DOWNLOAD_SUBTITLES, {"download_subtitles", {}, {}, 1}},
+    {SettingItem::DOWNLOAD_DEBUG_SOURCE, {"download_debug_source", {}, {}, 0}},
     {SettingItem::HTTP_PROXY, {"http_proxy", {}, {}, 0}},
     {SettingItem::DANMAKU_STYLE_FONT, {"danmaku_style_font", {"stroke", "incline", "shadow", "pure"}, {}, 0}},
     {SettingItem::SHORTCUT_REFRESH, {"shortcut_refresh", {}, {}, 0}},
@@ -551,15 +571,15 @@ void ProgramConfig::load() {
     }
 
 #ifdef __linux__
-    // Resolve an explicit UI profile before layout initialization. Legion Go + SteamOS/gamescope
-    // defaults to the handheld profile, while users can still override it later.
-    if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_PROFILE].key) && isSteamOSRuntime() && isLegionGoDevice()) {
+    // Resolve an explicit UI profile before layout initialization. Known 16:10 handhelds under
+    // SteamOS/gamescope default to the handheld profile, while users can still override it later.
+    if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_PROFILE].key) && isSteamOSRuntime() && isKnownHandheldDevice()) {
         setSettingItem(SettingItem::APP_UI_PROFILE, std::string{"handheld"}, false);
         migratedConfig = true;
     }
     const auto uiProfile = getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
     const bool handheldProfile = uiProfile == "handheld" ||
-        (uiProfile == "auto" && isSteamOSRuntime() && isLegionGoDevice());
+        (uiProfile == "auto" && isSteamOSRuntime() && isKnownHandheldDevice());
     const bool tvProfile = uiProfile == "tv";
     if (handheldProfile) {
         if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_SCALE].key)) {

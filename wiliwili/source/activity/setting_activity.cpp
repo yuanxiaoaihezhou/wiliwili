@@ -260,6 +260,7 @@ void SettingActivity::onContentAvailable() {
                 return;
             }
             ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_SPEED_LIMIT, value);
+            DownloadManager::instance().reloadRuntimeConfig();
         },
         "wiliwili/setting/tools/download/speed_hint"_i18n,
         "wiliwili/setting/tools/download/speed_hint"_i18n, 32);
@@ -273,6 +274,7 @@ void SettingActivity::onContentAvailable() {
             try { if (std::stod(value) < 0) value = "0"; }
             catch (...) { brls::Application::notify("wiliwili/setting/tools/download/speed_invalid"_i18n); return; }
             ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_PLAYBACK_SPEED_LIMIT, value);
+            DownloadManager::instance().reloadRuntimeConfig();
         },
         "wiliwili/setting/tools/download/playback_speed_hint"_i18n,
         "wiliwili/setting/tools/download/playback_speed_hint"_i18n, 32);
@@ -285,6 +287,7 @@ void SettingActivity::onContentAvailable() {
                 int value = std::stoi(pystring::strip(data));
                 value = std::max(1, std::min(4, value));
                 ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_CONCURRENCY, std::to_string(value));
+                DownloadManager::instance().reloadRuntimeConfig();
             } catch (...) { brls::Application::notify("wiliwili/setting/tools/download/concurrency_invalid"_i18n); }
         },
         "wiliwili/setting/tools/download/concurrency_hint"_i18n,
@@ -303,13 +306,28 @@ void SettingActivity::onContentAvailable() {
         });
     btnDownloadCover->init("wiliwili/setting/tools/download/cover"_i18n,
         ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_COVER),
-        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_COVER, value); });
+        [](bool value) {
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_COVER, value);
+            DownloadManager::instance().reloadRuntimeConfig();
+        });
     btnDownloadDanmaku->init("wiliwili/setting/tools/download/danmaku"_i18n,
         ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_DANMAKU),
-        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_DANMAKU, value); });
+        [](bool value) {
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_DANMAKU, value);
+            DownloadManager::instance().reloadRuntimeConfig();
+        });
     btnDownloadSubtitles->init("wiliwili/setting/tools/download/subtitles"_i18n,
         ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_SUBTITLES),
-        [](bool value) { ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_SUBTITLES, value); });
+        [](bool value) {
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_SUBTITLES, value);
+            DownloadManager::instance().reloadRuntimeConfig();
+        });
+    btnDownloadDebugSource->init("wiliwili/setting/tools/download/debug_source"_i18n,
+        ProgramConfig::instance().getBoolOption(SettingItem::DOWNLOAD_DEBUG_SOURCE),
+        [](bool value) {
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_DEBUG_SOURCE, value);
+            DownloadManager::instance().reloadRuntimeConfig();
+        });
 
     btnTutorialFont->registerClickAction([](...) -> bool {
         auto dialog =

@@ -146,10 +146,10 @@
                 "dir": "Download directory",
                 "dir_hint": "Default: ~/Videos/wiliwili",
                 "speed": "Download speed limit (MB/s)",
-                "speed_hint": "0 means unlimited",
+                "speed_hint": "0 means unlimited; shared by all concurrent downloads",
                 "speed_invalid": "Download speed limit must be a non-negative number",
                 "playback_speed": "Background limit while playing (MB/s)",
-                "playback_speed_hint": "Default 5; 0 disables the playback-specific limit",
+                "playback_speed_hint": "Global background limit while streaming; default 5, 0 disables the playback-specific cap",
                 "concurrency": "Concurrent downloads (1-4)",
                 "concurrency_hint": "Recommended: 1-2 on handhelds",
                 "concurrency_invalid": "Concurrent downloads must be between 1 and 4",
@@ -158,6 +158,7 @@
                 "cover": "Download cover",
                 "danmaku": "Download danmaku",
                 "subtitles": "Download subtitles (SRT / ASS)",
+                "debug_source": "Salva URL CDN temporanei (debug)",
                 "dir_invalid": "Cannot create the download directory; the previous setting was restored"
             }
         },
@@ -568,6 +569,7 @@
             "video": "Downloading video",
             "audio": "Downloading audio",
             "muxing": "Merging audio/video",
+            "verifying": "Verifica del file multimediale",
             "extras": "Saving cover, danmaku and subtitles",
             "done": "Ready offline"
         },

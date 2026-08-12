@@ -1,10 +1,14 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -40,11 +44,13 @@ enum class DownloadTaskStage {
     DOWNLOADING_AUDIO,
     MUXING,
     FETCHING_EXTRAS,
-    COMPLETED
+    COMPLETED,
+    // Appended instead of inserted so persisted schema-v2 stage integers keep their meaning.
+    VERIFYING
 };
 
 struct DownloadTask {
-    int schema_version = 2;
+    int schema_version = 3;
     std::string id;
     std::string bvid;
     uint64_t cid = 0;
@@ -72,6 +78,8 @@ struct DownloadTask {
 
     bool is_dash = false;
     bool is_pgc = false;
+    // Ephemeral CDN data. These are intentionally not persisted in download_state.json because
+    // signed Bilibili URLs expire and should always be refreshed after a process restart.
     std::vector<std::string> video_urls;
     std::vector<std::string> audio_urls;
     std::vector<FlvSegment> flv_segments;
@@ -85,6 +93,9 @@ struct DownloadTask {
     int64_t audio_downloaded_bytes = 0;
     int64_t audio_total_bytes = 0;
 
+    // Root that owned this task when it was created. Persist it so recursive deletion remains
+    // constrained even after the user changes the global download directory.
+    std::string download_root;
     std::string dir;
     std::string video_file;
     std::string audio_file;
@@ -98,6 +109,8 @@ struct DownloadTask {
 };
 
 inline void to_json(nlohmann::json& j, const DownloadTask& t) {
+    // Deliberately omit video_urls/audio_urls/flv_segments. They are temporary signed transport
+    // details and are refreshed at the start of every resumed/restarted task.
     j = nlohmann::json{
         {"schema_version", t.schema_version}, {"id", t.id}, {"bvid", t.bvid}, {"cid", t.cid}, {"aid", t.aid},
         {"title", t.title}, {"series_title", t.series_title}, {"part_title", t.part_title}, {"part_index", t.part_index},
@@ -106,11 +119,11 @@ inline void to_json(nlohmann::json& j, const DownloadTask& t) {
         {"video_codec_id", t.video_codec_id}, {"video_bandwidth", t.video_bandwidth}, {"video_width", t.video_width},
         {"video_height", t.video_height}, {"audio_id", t.audio_id}, {"audio_desc", t.audio_desc},
         {"audio_codec_id", t.audio_codec_id}, {"audio_bandwidth", t.audio_bandwidth}, {"is_dash", t.is_dash},
-        {"is_pgc", t.is_pgc}, {"video_urls", t.video_urls}, {"audio_urls", t.audio_urls},
-        {"flv_segments", t.flv_segments}, {"status", static_cast<int>(t.status)}, {"stage", static_cast<int>(t.stage)},
+        {"is_pgc", t.is_pgc}, {"status", static_cast<int>(t.status)}, {"stage", static_cast<int>(t.stage)},
         {"error_message", t.error_message}, {"estimated_bytes", t.estimated_bytes}, {"downloaded_bytes", t.downloaded_bytes},
         {"total_bytes", t.total_bytes}, {"audio_downloaded_bytes", t.audio_downloaded_bytes},
-        {"audio_total_bytes", t.audio_total_bytes}, {"dir", t.dir}, {"video_file", t.video_file},
+        {"audio_total_bytes", t.audio_total_bytes}, {"download_root", t.download_root}, {"dir", t.dir},
+        {"video_file", t.video_file},
         {"audio_file", t.audio_file}, {"output_file", t.output_file}, {"muxed", t.muxed},
         {"created_at", t.created_at}, {"finished_at", t.finished_at}};
 }
@@ -128,18 +141,20 @@ inline void from_json(const nlohmann::json& j, DownloadTask& t) {
     t.video_height = j.value("video_height", 0); t.audio_id = j.value("audio_id", 0);
     t.audio_desc = j.value("audio_desc", ""); t.audio_codec_id = j.value("audio_codec_id", 0);
     t.audio_bandwidth = j.value("audio_bandwidth", 0u); t.is_dash = j.value("is_dash", false);
-    t.is_pgc = j.value("is_pgc", false); t.video_urls = j.value("video_urls", std::vector<std::string>{});
-    t.audio_urls = j.value("audio_urls", std::vector<std::string>{});
-    t.flv_segments = j.value("flv_segments", std::vector<FlvSegment>{});
+    t.is_pgc = j.value("is_pgc", false);
+    // Ignore legacy persisted CDN URLs from schema <=2. Resume always refreshes them.
+    t.video_urls.clear(); t.audio_urls.clear(); t.flv_segments.clear();
     t.status = static_cast<DownloadTaskStatus>(j.value("status", 0));
     t.stage = static_cast<DownloadTaskStage>(j.value("stage", static_cast<int>(DownloadTaskStage::QUEUED)));
     t.error_message = j.value("error_message", ""); t.estimated_bytes = j.value("estimated_bytes", int64_t{0});
     t.downloaded_bytes = j.value("downloaded_bytes", int64_t{0}); t.total_bytes = j.value("total_bytes", int64_t{0});
     t.audio_downloaded_bytes = j.value("audio_downloaded_bytes", int64_t{0});
-    t.audio_total_bytes = j.value("audio_total_bytes", int64_t{0}); t.dir = j.value("dir", "");
+    t.audio_total_bytes = j.value("audio_total_bytes", int64_t{0});
+    t.download_root = j.value("download_root", ""); t.dir = j.value("dir", "");
     t.video_file = j.value("video_file", ""); t.audio_file = j.value("audio_file", "");
     t.output_file = j.value("output_file", ""); t.muxed = j.value("muxed", false);
     t.created_at = j.value("created_at", int64_t{0}); t.finished_at = j.value("finished_at", int64_t{0});
+    t.schema_version = 3;
     t.cancelFlag = std::make_shared<std::atomic<bool>>(false);
     t.pauseFlag = std::make_shared<std::atomic<bool>>(false);
 }
@@ -150,8 +165,11 @@ public:
     ~DownloadManager();
 
     void initRuntimeHooks();
+    void reloadRuntimeConfig();
+    void shutdown();
     void loadState();
     void saveState();
+    void scanOfflineLibrary();
     void addTask(DownloadTask task);
     void addTasks(std::vector<DownloadTask> batch);
     void pauseTask(const std::string& id);
@@ -187,22 +205,60 @@ private:
     bool runtimeHooksInitialized = false;
     std::atomic<bool> playbackActive{false};
 
+    // Worker pool: no detached threads may outlive Borealis/mpv during shutdown.
+    std::mutex workerMutex;
+    std::condition_variable workerCv;
+    std::vector<std::thread> workerThreads;
+    std::atomic<bool> shuttingDown{false};
+
+    // Worker-visible settings are copied into atomics on the UI/main thread. Download workers never
+    // read ProgramConfig::setting directly, avoiding concurrent nlohmann::json reads/writes.
+    std::atomic<int> concurrentLimit{2};
+    std::atomic<int64_t> normalSpeedLimit{0};
+    std::atomic<int64_t> playbackSpeedLimit{5LL * 1024LL * 1024LL};
+    std::atomic<bool> runtimeDownloadCover{true};
+    std::atomic<bool> runtimeDownloadDanmaku{true};
+    std::atomic<bool> runtimeDownloadSubtitles{true};
+    std::atomic<bool> runtimeDebugSource{false};
+
+    // Shared bandwidth budget. The UI value is a total background-download limit, not per-task.
+    std::mutex throttleMutex;
+    std::condition_variable throttleCv;
+    std::chrono::steady_clock::time_point throttleLastRefill{};
+    double throttleTokens = 0.0;
+
+    // Prevent concurrent tasks from each independently claiming the same free space.
+    std::mutex reservationMutex;
+    std::unordered_map<std::string, int64_t> diskReservations;
+
     int maxConcurrent() const;
     int64_t effectiveSpeedLimit() const;
+    void ensureWorkers();
+    void workerLoop();
     void startNextTask();
+    void handleWorkerFailure(const std::string& id, const std::string& error);
     void runTask(const std::string& id);
     bool refreshSource(DownloadTask& task);
     bool downloadDash(DownloadTask& task);
     bool downloadFlv(DownloadTask& task);
+    bool concatFlvSegments(DownloadTask& task, const std::vector<std::string>& segmentFiles);
     bool tryMuxDash(DownloadTask& task);
+    bool verifyTaskMedia(DownloadTask& task);
+    bool probeMediaFile(const std::string& path, const DownloadTask& task,
+                        bool requireVideo = true, bool requireAudio = false, bool checkTaskDuration = false);
+    int runTool(const std::vector<std::string>& args, const DownloadTask* task = nullptr, std::string* output = nullptr);
     void writeReadme(const DownloadTask& task);
     bool downloadFile(const std::string& url, const std::string& filepath,
                       std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag,
                       int64_t& downloadedBytes, int64_t& totalBytes,
                       const std::string& taskId, bool audioPart = false);
+    bool throttleBytes(size_t bytes, std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag);
+    bool reserveDiskSpace(const std::string& taskId, const std::string& path, int64_t requiredBytes, int64_t& freeBytes);
+    void releaseDiskSpace(const std::string& taskId);
     void updateLiveProgress(const std::string& taskId, int64_t downloaded, int64_t total, bool audioPart);
     void updateStage(const std::string& taskId, DownloadTaskStage stage, const std::string& error = "");
     void saveMetadata(const DownloadTask& task, bool completed);
+    bool isManagedTaskDirectory(const DownloadTask& task) const;
     void saveDanmaku(const DownloadTask& task);
     void saveSubtitles(const DownloadTask& task);
 };

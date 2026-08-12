@@ -392,6 +392,7 @@
                             <brls:BooleanCell id="tools/download_cover"/>
                             <brls:BooleanCell id="tools/download_danmaku"/>
                             <brls:BooleanCell id="tools/download_subtitles"/>
+                            <brls:BooleanCell id="tools/download_debug_source"/>
                         </brls:Box>
                         <brls:Header
                                 width="auto"

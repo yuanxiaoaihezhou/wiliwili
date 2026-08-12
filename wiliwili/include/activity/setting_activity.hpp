@@ -49,6 +49,7 @@ private:
     BRLS_BIND(brls::BooleanCell, btnDownloadCover, "tools/download_cover");
     BRLS_BIND(brls::BooleanCell, btnDownloadDanmaku, "tools/download_danmaku");
     BRLS_BIND(brls::BooleanCell, btnDownloadSubtitles, "tools/download_subtitles");
+    BRLS_BIND(brls::BooleanCell, btnDownloadDebugSource, "tools/download_debug_source");
     BRLS_BIND(brls::RadioCell, btnVibrationTest, "tools/vibration_test");
     BRLS_BIND(brls::RadioCell, btnDLNA, "tools/dlna");
     BRLS_BIND(brls::BooleanCell, btnTls, "setting/network/tls");

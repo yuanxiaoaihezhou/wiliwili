@@ -146,10 +146,10 @@
                 "dir": "下载目录",
                 "dir_hint": "默认：~/Videos/wiliwili",
                 "speed": "下载限速 (MB/s)",
-                "speed_hint": "0 表示不限速",
+                "speed_hint": "0 表示不限速；该速度由所有并发下载任务共享",
                 "speed_invalid": "下载限速必须是非负数字",
                 "playback_speed": "播放视频时后台下载限速（MB/s）",
-                "playback_speed_hint": "默认 5；填 0 表示不额外限速",
+                "playback_speed_hint": "播放在线视频时的全局后台下载限速；默认 5，填 0 表示不额外限速",
                 "concurrency": "同时下载任务数（1-4）",
                 "concurrency_hint": "掌机建议 1-2",
                 "concurrency_invalid": "同时下载任务数必须为 1 到 4",
@@ -158,6 +158,7 @@
                 "cover": "下载封面",
                 "danmaku": "下载弹幕",
                 "subtitles": "下载字幕（SRT / ASS）",
+                "debug_source": "保存临时 CDN 地址（调试）",
                 "dir_invalid": "无法创建下载目录，已恢复之前的设置"
             }
         },
@@ -568,6 +569,7 @@
             "video": "正在下载视频",
             "audio": "正在下载音频",
             "muxing": "正在合并音视频",
+            "verifying": "正在验证媒体完整性",
             "extras": "正在保存封面、弹幕和字幕",
             "done": "可离线播放"
         },

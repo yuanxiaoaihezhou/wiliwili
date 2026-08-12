@@ -756,9 +756,14 @@ void BasePlayerActivity::showDownloadDialog() {
                 return;
             }
             const int64_t freeBytes = DownloadManager::availableBytes(DownloadManager::defaultDownloadDir());
-            if (estimatedTotal > 0 && freeBytes >= 0 && freeBytes < estimatedTotal + 128LL * 1024LL * 1024LL) {
+            // DASH muxing temporarily needs the downloaded tracks and the final MP4 at the same
+            // time. The manager performs authoritative per-task reservations; this is an early
+            // batch-level warning so users do not enqueue a season that obviously cannot fit.
+            const int64_t muxReserve = selected.is_dash && selected.audio_id != 0 ? estimatedTotal : 0;
+            const int64_t estimatedRequired = estimatedTotal + muxReserve + 128LL * 1024LL * 1024LL;
+            if (estimatedTotal > 0 && freeBytes >= 0 && freeBytes < estimatedRequired) {
                 brls::Application::notify(fmt::format("{}: ~{} / {}: {}",
-                    "wiliwili/player/download/not_enough_space"_i18n, humanDownloadBytes(estimatedTotal),
+                    "wiliwili/player/download/not_enough_space"_i18n, humanDownloadBytes(estimatedRequired),
                     "wiliwili/player/download/free_space"_i18n, humanDownloadBytes(freeBytes)));
                 return;
             }
