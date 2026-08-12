@@ -93,7 +93,7 @@ jobs:
         run: |
           set -euxo pipefail
           pkg-config --modversion dbus-1
-          pkg-config --modversion libmpv
+          pkg-config --modversion mpv
           pkg-config --modversion libwebp
           pkg-config --modversion libcurl
           pkg-config --modversion wayland-client
