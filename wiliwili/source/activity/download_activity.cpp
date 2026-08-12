@@ -219,7 +219,7 @@ void DownloadCard::setTask(const DownloadTask& task) {
     percentLabel->setText(percentText);
     statusLabel->setText(statusText(task.status));
 
-    const auto theme = brls::Application::getTheme();
+    auto theme = brls::Application::getTheme();
     if (task.status == DownloadTaskStatus::FAILED || task.status == DownloadTaskStatus::CANCELLED) {
         statusBox->setBackgroundColor(theme.getColor("color/tip/red"));
     } else if (task.status == DownloadTaskStatus::COMPLETED || task.status == DownloadTaskStatus::PAUSED ||
