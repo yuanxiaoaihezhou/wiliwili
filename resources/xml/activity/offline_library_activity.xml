@@ -1,12 +1,20 @@
 <brls:AppletFrame iconInterpolation="linear" headerHidden="true" footerHidden="false">
     <brls:Box backgroundColor="@theme/brls/background" axis="column" grow="1">
-        <brls:Box height="70" width="100%" alignItems="center" paddingLeft="28" paddingRight="72">
-            <brls:Label text="@i18n/wiliwili/download_manager/offline_library" fontSize="26" grow="1"/>
+        <brls:Box height="64" width="100%" alignItems="center" paddingLeft="24" paddingRight="72">
+            <brls:Label text="@i18n/wiliwili/download_manager/offline_library" fontSize="25" grow="1"/>
         </brls:Box>
-        <brls:Label text="@i18n/wiliwili/download_manager/library_hint" fontSize="15" textColor="@theme/font/grey"
-                    marginLeft="28" marginRight="28" marginBottom="10"/>
-        <RecyclingGrid id="download/grid" paddingLeft="20" paddingRight="20" grow="1" spanCount="1"
-                       itemSpace="10" flowMode="true" itemHeight="118" wireframe="false"/>
+        <RecyclingGrid
+                id="download/grid"
+                paddingLeft="20"
+                paddingRight="20"
+                paddingBottom="8"
+                grow="1"
+                spanCount="@style/wiliwili/grid/span/4"
+                itemSpace="8"
+                preFetchLine="2"
+                flowMode="true"
+                itemHeight="250"
+                wireframe="false"/>
         <ButtonClose positionType="absolute" positionTop="2" positionRight="2"/>
     </brls:Box>
 </brls:AppletFrame>

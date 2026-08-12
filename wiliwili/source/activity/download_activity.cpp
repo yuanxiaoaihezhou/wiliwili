@@ -13,6 +13,7 @@
 #include <borealis/views/dialog.hpp>
 
 #include "utils/config_helper.hpp"
+#include "utils/image_helper.hpp"
 #include "utils/dialog_helper.hpp"
 #include "view/mpv_core.hpp"
 #include "view/video_view.hpp"
@@ -144,47 +145,89 @@ static std::string stageText(DownloadTaskStage stage) {
 
 DownloadCard::DownloadCard() {
     inflateFromXMLRes("xml/views/download_card.xml");
-    const auto profile = ProgramConfig::instance().getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
-    if (profile == "handheld") setHeight(132);
 }
+
+DownloadCard::~DownloadCard() { ImageHelper::clear(coverImage); }
+
 RecyclingGridItem* DownloadCard::create() { return new DownloadCard(); }
 
+void DownloadCard::prepareForReuse() {
+    coverImage->setImageFromRes("pictures/video-card-bg.png");
+}
+
+void DownloadCard::cacheForReuse() {
+    ImageHelper::clear(coverImage);
+    loadedCoverUrl.clear();
+}
+
 void DownloadCard::setTask(const DownloadTask& task) {
-    titleLabel->setText(task.title.empty() ? task.bvid : task.title);
-    std::string meta = task.quality_desc.empty() ? std::to_string(task.quality) : task.quality_desc;
-    if (task.video_codec_id != 0) {
-        if (task.video_codec_id == 7) meta += " · AVC";
-        else if (task.video_codec_id == 12) meta += " · HEVC";
-        else if (task.video_codec_id == 13) meta += " · AV1";
+    const std::string displayTitle = task.title.empty() ? task.bvid : task.title;
+    titleLabel->setIsWrapping(true);
+    titleLabel->setText(displayTitle);
+
+    std::string cover = task.cover_url;
+    if (!cover.empty()) cover += ImageHelper::h_ext;
+    if (cover != loadedCoverUrl) {
+        ImageHelper::clear(coverImage);
+        coverImage->setImageFromRes("pictures/video-card-bg.png");
+        loadedCoverUrl = cover;
+        if (!cover.empty()) ImageHelper::with(coverImage)->load(cover);
     }
-    if (!task.audio_desc.empty()) meta += " · " + task.audio_desc;
-    if (!task.owner_name.empty()) meta += " · " + task.owner_name;
-    if (!task.part_title.empty() && task.part_title != task.title && task.title.find(task.part_title) == std::string::npos)
-        meta += " · " + task.part_title;
-    if (task.status == DownloadTaskStatus::COMPLETED) {
-        const auto date = finishedDate(task.finished_at);
-        if (!date.empty()) meta += " · " + date;
-    }
+
+    // Recommendation-style information hierarchy: author first, then the media choices that
+    // distinguish this offline copy. Keep the progress/status information on the image itself.
+    std::string meta = task.owner_name;
+    auto appendMeta = [&](const std::string& value) {
+        if (value.empty()) return;
+        if (!meta.empty()) meta += " · ";
+        meta += value;
+    };
+    appendMeta(task.quality_desc.empty() ? (task.quality > 0 ? std::to_string(task.quality) : std::string{}) : task.quality_desc);
+    if (task.video_codec_id == 7) appendMeta("AVC");
+    else if (task.video_codec_id == 12) appendMeta("HEVC");
+    else if (task.video_codec_id == 13) appendMeta("AV1");
+    appendMeta(task.audio_desc);
+    if (meta.empty() && !task.part_title.empty()) meta = task.part_title;
     metaLabel->setText(meta);
 
-    const int64_t done = task.downloaded_bytes + task.audio_downloaded_bytes;
-    const int64_t total = task.total_bytes + task.audio_total_bytes;
-    std::string progress;
-    if (task.status == DownloadTaskStatus::FAILED && !task.error_message.empty()) {
-        progress = task.error_message;
-    } else if (task.status == DownloadTaskStatus::COMPLETED) {
-        progress = stageText(DownloadTaskStage::COMPLETED) + " · " + humanBytes(done);
-        if (!task.error_message.empty()) progress += " · " + task.error_message;
-    } else if (total > 0) {
-        const int percent = static_cast<int>(std::min<int64_t>(100, done * 100 / std::max<int64_t>(1, total)));
-        progress = fmt::format("{} · {} / {} · {}%", stageText(task.stage), humanBytes(done), humanBytes(total), percent);
+    const int64_t done = std::max<int64_t>(0, task.downloaded_bytes) + std::max<int64_t>(0, task.audio_downloaded_bytes);
+    const int64_t knownTotal = std::max<int64_t>(0, task.total_bytes) + std::max<int64_t>(0, task.audio_total_bytes);
+    const int64_t estimate = DownloadManager::estimateBytes(task);
+    const int64_t total = knownTotal > 0 ? knownTotal : std::max<int64_t>(0, estimate);
+    float ratio = 0.0f;
+    if (task.status == DownloadTaskStatus::COMPLETED) ratio = 1.0f;
+    else if (total > 0) ratio = static_cast<float>(std::min<double>(1.0, static_cast<double>(done) / total));
+    progressBar->setWidthPercentage(ratio * 100.0f);
+
+    std::string progressText;
+    std::string percentText;
+    if (task.status == DownloadTaskStatus::COMPLETED) {
+        progressText = humanBytes(done > 0 ? done : total);
+        const auto date = finishedDate(task.finished_at);
+        percentText = date.empty() ? "100%" : date;
+    } else if (task.status == DownloadTaskStatus::FAILED) {
+        progressText = stageText(task.stage);
+        if (done > 0) progressText += " · " + humanBytes(done);
+        percentText = "!";
     } else {
-        const auto estimate = DownloadManager::estimateBytes(task);
-        progress = stageText(task.stage) + " · " + humanBytes(done);
-        if (estimate > 0) progress += " / ~" + humanBytes(estimate);
+        progressText = stageText(task.stage);
+        if (total > 0) progressText += " · " + humanBytes(done) + " / " + humanBytes(total);
+        else if (done > 0) progressText += " · " + humanBytes(done);
+        percentText = total > 0 ? fmt::format("{}%", static_cast<int>(ratio * 100.0f)) : "--";
     }
-    progressLabel->setText(progress);
+    progressLabel->setText(progressText);
+    percentLabel->setText(percentText);
     statusLabel->setText(statusText(task.status));
+
+    const auto theme = brls::Application::getTheme();
+    if (task.status == DownloadTaskStatus::FAILED || task.status == DownloadTaskStatus::CANCELLED) {
+        statusBox->setBackgroundColor(theme.getColor("color/tip/red"));
+    } else if (task.status == DownloadTaskStatus::COMPLETED || task.status == DownloadTaskStatus::PAUSED ||
+               task.status == DownloadTaskStatus::PENDING) {
+        statusBox->setBackgroundColor(theme.getColor("color/grey_4"));
+    } else {
+        statusBox->setBackgroundColor(theme.getColor("color/bilibili"));
+    }
 }
 
 static void playOfflineTask(const DownloadTask& task) {
@@ -277,8 +320,7 @@ private:
 
 void DownloadActivity::onContentAvailable() {
     grid->registerCell("Cell", []() { return DownloadCard::create(); });
-    const auto profile = ProgramConfig::instance().getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
-    grid->estimatedRowHeight = profile == "handheld" ? 132 : 118;
+    grid->estimatedRowHeight = 250;
     reload();
     registerAction("wiliwili/download_manager/offline_library"_i18n, brls::ControllerButton::BUTTON_Y,
                    [](brls::View*) { brls::Application::pushActivity(new OfflineLibraryActivity()); return true; }, true);
@@ -332,7 +374,7 @@ DownloadActivity::~DownloadActivity() {
 
 void OfflineLibraryActivity::onContentAvailable() {
     grid->registerCell("Cell", []() { return DownloadCard::create(); });
-    grid->estimatedRowHeight = 118;
+    grid->estimatedRowHeight = 250;
     reload();
     statusSub = DownloadManager::instance().getTaskStatusChangedEvent()->subscribe([this](const std::string&) { reload(); });
 }
@@ -348,6 +390,24 @@ void OfflineLibraryActivity::reload() {
 
 OfflineLibraryActivity::~OfflineLibraryActivity() {
     DownloadManager::instance().getTaskStatusChangedEvent()->unsubscribe(statusSub);
+}
+
+OfflinePlayerActivity::~OfflinePlayerActivity() {
+    if (mpvEventSubscribed) {
+        MPV_E->unsubscribe(mpvEventSubscription);
+        mpvEventSubscribed = false;
+    }
+
+    // Stop the local file before this VideoView disappears. Otherwise libmpv keeps the last
+    // frame/file alive and a later online player can inherit local-file state unexpectedly.
+    MPVCore::instance().stop();
+
+    // Local playback uses copy-back decoding as a compatibility guard for libmpv's OpenGL FBO
+    // path on SteamOS/AMD. Restore the configured online-playback hwdec method on exit.
+    if (copyBackHwdec) {
+        MPVCore::instance().setHwdecCopyMode(false);
+        copyBackHwdec = false;
+    }
 }
 
 void OfflinePlayerActivity::onContentAvailable() {
@@ -371,15 +431,46 @@ void OfflinePlayerActivity::onContentAvailable() {
         return;
     }
 
-    const auto subtitlePath = selectOfflineSubtitle(task);
+    subtitlePath = selectOfflineSubtitle(task);
+    subtitleAttached = false;
 
-    // loadfile's fourth argument is a comma-separated suboption list. mpv documents its
-    // fixed-length %n%... syntax specifically for paths containing suboption separators.
-    std::string extra;
-    if (!audioPath.empty()) extra += "audio-file=" + mpvFixedLengthPath(audioPath);
-    if (!subtitlePath.empty()) {
-        if (!extra.empty()) extra += ",";
-        extra += "sub-file=" + mpvFixedLengthPath(subtitlePath);
+    auto& mpv = MPVCore::instance();
+
+    // A local file can have a different codec/pixel format from the currently streamed file.
+    // Clear the previous file state first, then use copy-back hardware decoding for this activity.
+    // auto-copy/vaapi-copy still decodes in hardware but presents normal system-memory frames to
+    // libmpv's renderer, avoiding the direct interop path that produced a static grey frame on
+    // the SteamOS Legion Go while VLC rendered the same file correctly.
+    mpv.stop();
+    mpv.reset();
+    if (MPVCore::HARDWARE_DEC) {
+        mpv.setHwdecCopyMode(true);
+        copyBackHwdec = true;
     }
-    MPVCore::instance().setUrl(videoPath, extra);
+
+    // Add subtitles only after the main media has reached FILE_LOADED. Keeping subtitle paths
+    // out of loadfile's comma-separated per-file options prevents a local subtitle/path parsing
+    // issue from affecting the primary video load. A separate DASH audio track still has to be
+    // attached as a per-file option so it starts in sync with the video file.
+    mpvEventSubscription = MPV_E->subscribe([this](MpvEventEnum event) {
+        if (event == MpvEventEnum::MPV_LOADED) {
+            if (!subtitleAttached && !subtitlePath.empty()) {
+                MPVCore::instance().command_async("sub-add", subtitlePath, "select");
+                subtitleAttached = true;
+            }
+            MPVCore::instance().resume();
+        } else if (event == MpvEventEnum::MPV_FILE_ERROR) {
+            brls::Application::notify("wiliwili/download_manager/play_missing"_i18n);
+        }
+    });
+    mpvEventSubscribed = true;
+
+    std::string extra;
+    if (!audioPath.empty()) extra = "audio-file=" + mpvFixedLengthPath(audioPath);
+
+    brls::Logger::info("OfflinePlayer: video={}, external_audio={}, subtitle={}, copy_back_hwdec={}",
+                       cpr::fs::path(videoPath).filename().string(), !audioPath.empty(), !subtitlePath.empty(), copyBackHwdec);
+    mpv.setUrl(videoPath, extra);
+    mpv.resume();
 }
+

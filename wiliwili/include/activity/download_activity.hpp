@@ -6,8 +6,12 @@
 #include <borealis/core/activity.hpp>
 #include <borealis/core/bind.hpp>
 #include <borealis/views/label.hpp>
+#include <borealis/views/image.hpp>
+
+#include "view/text_box.hpp"
 
 #include "utils/download_manager.hpp"
+#include "utils/event_helper.hpp"
 #include "view/recycling_grid.hpp"
 
 class VideoView;
@@ -15,14 +19,22 @@ class VideoView;
 class DownloadCard : public RecyclingGridItem {
 public:
     DownloadCard();
+    ~DownloadCard() override;
     static RecyclingGridItem* create();
     void setTask(const DownloadTask& task);
+    void prepareForReuse() override;
+    void cacheForReuse() override;
 
 private:
-    BRLS_BIND(brls::Label, titleLabel, "download/title");
-    BRLS_BIND(brls::Label, metaLabel, "download/meta");
-    BRLS_BIND(brls::Label, progressLabel, "download/progress");
+    BRLS_BIND(brls::Image, coverImage, "download/cover");
+    BRLS_BIND(brls::Box, statusBox, "download/status_box");
     BRLS_BIND(brls::Label, statusLabel, "download/status");
+    BRLS_BIND(brls::Label, progressLabel, "download/progress");
+    BRLS_BIND(brls::Label, percentLabel, "download/percent");
+    BRLS_BIND(brls::Box, progressBar, "download/progress_bar");
+    BRLS_BIND(TextBox, titleLabel, "download/title");
+    BRLS_BIND(brls::Label, metaLabel, "download/meta");
+    std::string loadedCoverUrl;
 };
 
 class DownloadActivity : public brls::Activity {
@@ -58,10 +70,16 @@ class OfflinePlayerActivity : public brls::Activity {
 public:
     CONTENT_FROM_XML_RES("activity/offline_player_activity.xml");
     explicit OfflinePlayerActivity(DownloadTask task) : task(std::move(task)) {}
+    ~OfflinePlayerActivity() override;
     void onContentAvailable() override;
 
 private:
     DownloadTask task;
+    std::string subtitlePath;
+    MPVEvent::Subscription mpvEventSubscription{};
+    bool mpvEventSubscribed = false;
+    bool copyBackHwdec = false;
+    bool subtitleAttached = false;
     BRLS_BIND(VideoView, video, "offline/video");
     BRLS_BIND(brls::Label, title, "offline/title");
 };

@@ -1,23 +1,108 @@
 <brls:Box
         focusable="true"
         wireframe="false"
-        highlightCornerRadius="12"
-        axis="row"
-        width="100%"
-        height="118"
-        padding="14"
-        cornerRadius="12"
-        backgroundColor="@theme/brls/backdrop"
-        alignItems="center">
-    <brls:Box axis="column" grow="1" height="auto" justifyContent="center">
-        <brls:Label id="download/title" fontSize="20" singleLine="true" width="100%"/>
-        <brls:Label id="download/meta" fontSize="14" textColor="@theme/font/grey" singleLine="true" marginTop="5" width="100%"/>
-        <brls:Label id="download/progress" fontSize="14" textColor="@theme/font/grey" singleLine="true" marginTop="4" width="100%"/>
+        highlightCornerRadius="8"
+        axis="column"
+        width="auto"
+        height="auto">
+    <brls:Box
+            id="download/pic_box"
+            width="100%"
+            height="60%">
+        <brls:Image
+                id="download/cover"
+                scalingType="fill"
+                height="100%"
+                width="100%"
+                image="@res/pictures/video-card-bg.png"
+                cornerRadius="4"/>
+
+        <brls:Box
+                id="download/status_box"
+                positionType="absolute"
+                positionTop="8"
+                positionRight="0"
+                marginRight="8"
+                cornerRadius="4"
+                paddingLeft="7"
+                paddingRight="7"
+                paddingTop="4"
+                paddingBottom="4"
+                backgroundColor="@theme/color/bilibili">
+            <brls:Label
+                    id="download/status"
+                    textColor="#FFFFFF"
+                    fontSize="14"
+                    height="16"
+                    horizontalAlign="center"/>
+        </brls:Box>
+
+        <brls:Box
+                positionBottom="0"
+                positionType="absolute"
+                background="vertical_linear"
+                paddingLeft="10"
+                paddingRight="10"
+                width="100%"
+                height="24%"
+                alignItems="center">
+            <brls:Label
+                    id="download/progress"
+                    textColor="#FFFFFF"
+                    fontSize="14"
+                    singleLine="true"
+                    width="74%"/>
+            <brls:Label
+                    id="download/percent"
+                    positionType="absolute"
+                    positionRight="10"
+                    textColor="#FFFFFF"
+                    fontSize="15"
+                    horizontalAlign="right"
+                    singleLine="true"/>
+        </brls:Box>
+
+        <brls:Box
+                wireframe="false"
+                positionType="absolute"
+                positionBottom="0"
+                width="100%"
+                height="3"
+                backgroundColor="#353535">
+            <brls:Box
+                    id="download/progress_bar"
+                    height="3"
+                    width="0%"
+                    backgroundColor="@theme/color/bilibili"/>
+        </brls:Box>
     </brls:Box>
-    <brls:Label
-            id="download/status"
-            width="150"
-            horizontalAlign="right"
-            fontSize="16"
-            marginLeft="18"/>
+
+    <brls:Box
+            margin="10"
+            axis="column">
+        <TextBox
+                id="download/title"
+                fontSize="20"
+                lineHeight="1.5"
+                maxRows="2"
+                width="100%"
+                height="60"/>
+        <brls:Box
+                width="100%"
+                height="20"
+                alignItems="center">
+            <SVGImage
+                    id="download/up"
+                    height="14"
+                    width="18"
+                    SVG="@res/svg/widget-up.svg"/>
+            <brls:Label
+                    id="download/meta"
+                    marginLeft="4"
+                    fontSize="16"
+                    singleLine="true"
+                    textColor="@theme/font/grey"
+                    height="100%"/>
+        </brls:Box>
+    </brls:Box>
 </brls:Box>
