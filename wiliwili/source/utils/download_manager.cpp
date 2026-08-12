@@ -485,7 +485,7 @@ int64_t DownloadManager::effectiveSpeedLimit() const {
         try { const double mb = std::stod(value); return mb > 0 ? static_cast<int64_t>(mb * 1024.0 * 1024.0) : 0; }
         catch (...) { return 0; }
     };
-    const auto& conf = ProgramConfig::instance();
+    auto& conf = ProgramConfig::instance();
     int64_t normal = parse(conf.getSettingItem(SettingItem::DOWNLOAD_SPEED_LIMIT, std::string{"0"}));
     if (!playbackActive.load()) return normal;
     int64_t duringPlayback = parse(conf.getSettingItem(SettingItem::DOWNLOAD_PLAYBACK_SPEED_LIMIT, std::string{"5"}));
