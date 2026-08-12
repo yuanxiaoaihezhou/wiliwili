@@ -1,0 +1,169 @@
+name: Build AppImage
+
+on:
+  workflow_dispatch:
+    inputs:
+      disable_unity_build:
+        description: Disable CMake unity build (useful for debugging build failures)
+        required: false
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/appimage.yml'
+      - 'CMakeLists.txt'
+      - 'cmake/**'
+      - 'library/**'
+      - 'resources/**'
+      - 'scripts/linux/**'
+      - 'wiliwili/**'
+  push:
+    branches:
+      - yoga
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: appimage-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-appimage:
+    name: Linux x86_64 AppImage
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    env:
+      APPDIR: ${{ github.workspace }}/AppDir
+      APPIMAGE_EXTRACT_AND_RUN: '1'
+
+    steps:
+      - name: Checkout source and submodules
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libssl-dev \
+            libcurl4-openssl-dev \
+            libmpv-dev \
+            libwebp-dev \
+            libgl1-mesa-dev \
+            libegl1-mesa-dev \
+            libx11-dev \
+            libxrandr-dev \
+            libxinerama-dev \
+            libxcursor-dev \
+            libxi-dev \
+            libwayland-dev \
+            libxkbcommon-dev \
+            libasound2-dev \
+            libpulse-dev \
+            desktop-file-utils \
+            ffmpeg \
+            file \
+            patchelf \
+            wget
+
+      - name: Update gamepad mappings
+        run: |
+          BRLS_GLFW='library/borealis/library/lib/extern/glfw'
+          cmake -P "${BRLS_GLFW}/CMake/GenerateMappings.cmake" \
+            "${BRLS_GLFW}/src/mappings.h.in" \
+            "${BRLS_GLFW}/src/mappings.h"
+
+      - name: Configure
+        shell: bash
+        run: |
+          UNITY_BUILD=ON
+          if [[ '${{ github.event.inputs.disable_unity_build }}' == 'true' ]]; then
+            UNITY_BUILD=OFF
+          fi
+
+          cmake -S . -B build-appimage -G Ninja \
+            -DPLATFORM_DESKTOP=ON \
+            -DINSTALL=ON \
+            -DUSE_LIBROMFS=ON \
+            -DUSE_SYSTEM_CURL=ON \
+            -DGLFW_BUILD_WAYLAND=ON \
+            -DGLFW_BUILD_X11=ON \
+            -DUSE_EGL=ON \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBRLS_UNITY_BUILD="${UNITY_BUILD}" \
+            -DCMAKE_UNITY_BUILD_BATCH_SIZE=16 \
+            -DVERSION_BUILD='${{ github.run_number }}'
+
+      - name: Build and stage AppDir
+        run: |
+          cmake --build build-appimage --target wiliwili --parallel "$(nproc)"
+          DESTDIR="${APPDIR}" cmake --install build-appimage
+
+          test -x "${APPDIR}/usr/bin/wiliwili"
+          desktop-file-validate "${APPDIR}/usr/share/applications/cn.xfangfang.wiliwili.desktop"
+
+      - name: Download linuxdeploy
+        run: |
+          wget -q \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage \
+            -O linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+      - name: Bundle runtime and create AppImage
+        shell: bash
+        run: |
+          # Keep the native Linux build un-sandboxed so SteamOS can use the host's
+          # Mesa/VA-API stack. linuxdeploy bundles ordinary shared libraries, while
+          # GPU drivers remain supplied by the host.
+          ./linuxdeploy-x86_64.AppImage \
+            --appdir "${APPDIR}" \
+            --executable "${APPDIR}/usr/bin/wiliwili" \
+            --executable "$(command -v ffmpeg)" \
+            --desktop-file scripts/linux/cn.xfangfang.wiliwili.desktop \
+            --icon-file resources/svg/cn.xfangfang.wiliwili.svg \
+            --output appimage
+
+          APPIMAGE="$(find . -maxdepth 1 -type f -name '*.AppImage' ! -name 'linuxdeploy-*.AppImage' -print -quit)"
+          test -n "${APPIMAGE}"
+
+          VERSION="$(git describe --tags --always --dirty | tr '/ ' '--')"
+          OUTPUT="wiliwili-Linux-x86_64-${VERSION}.AppImage"
+          mv "${APPIMAGE}" "${OUTPUT}"
+          chmod +x "${OUTPUT}"
+          sha256sum "${OUTPUT}" > "${OUTPUT}.sha256"
+          echo "APPIMAGE_OUTPUT=${OUTPUT}" >> "${GITHUB_ENV}"
+
+      - name: Verify AppImage structure
+        shell: bash
+        run: |
+          rm -rf squashfs-root
+          "./${APPIMAGE_OUTPUT}" --appimage-extract >/dev/null
+          test -x squashfs-root/usr/bin/wiliwili
+          test -x squashfs-root/usr/bin/ffmpeg
+          test -f squashfs-root/cn.xfangfang.wiliwili.desktop
+          test -f squashfs-root/cn.xfangfang.wiliwili.svg
+          file "${APPIMAGE_OUTPUT}"
+          du -h "${APPIMAGE_OUTPUT}"
+          cat "${APPIMAGE_OUTPUT}.sha256"
+
+      - name: Upload AppImage artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: wiliwili-AppImage-x86_64-${{ github.run_number }}
+          path: |
+            ${{ env.APPIMAGE_OUTPUT }}
+            ${{ env.APPIMAGE_OUTPUT }}.sha256
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
