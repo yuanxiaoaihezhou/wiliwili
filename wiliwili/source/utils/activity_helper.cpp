@@ -7,6 +7,7 @@
 #include "activity/live_player_activity.hpp"
 #include "activity/hint_activity.hpp"
 #include "activity/setting_activity.hpp"
+#include "activity/download_activity.hpp"
 #include "activity/search_activity.hpp"
 #include "activity/search_activity_tv.hpp"
 #include "activity/pgc_index_activity.hpp"
@@ -101,6 +102,8 @@ void Intent::openInbox() {
     auto inbox = new InboxView();
     brls::Application::pushActivity(new brls::Activity(inbox));
 }
+
+void Intent::openDownloadManager() { brls::Application::pushActivity(new DownloadActivity()); }
 
 void Intent::openHint() { brls::Application::pushActivity(new HintActivity()); }
 

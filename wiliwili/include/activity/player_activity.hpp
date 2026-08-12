@@ -59,6 +59,9 @@ public:
     // 设置清晰度
     void setVideoQuality();
 
+    // 选择当前视频/音频轨并创建离线下载任务
+    void showDownloadDialog();
+
     // 切换评论模式
     void setCommentMode();
 
@@ -122,10 +125,12 @@ protected:
     BRLS_BIND(SVGImage, btnCoin, "video/btn/coin");
     BRLS_BIND(SVGImage, btnFavorite, "video/btn/favorite");
     BRLS_BIND(SVGImage, btnQR, "video/btn/qr");
+    BRLS_BIND(SVGImage, btnDownload, "video/btn/download");
     BRLS_BIND(brls::Label, labelAgree, "video/label/agree");
     BRLS_BIND(brls::Label, labelCoin, "video/label/coin");
     BRLS_BIND(brls::Label, labelFavorite, "video/label/favorite");
     BRLS_BIND(brls::Label, labelQR, "video/label/qr");
+    BRLS_BIND(brls::Label, labelDownload, "video/label/download");
 
     // 监控mpv事件
     MPVEvent::Subscription eventSubscribeID;
@@ -140,6 +145,7 @@ private:
 
     // 重新选择当前清晰度的播放链接播放
     void updateVideoLink();
+
 };
 
 class PlayerActivity : public BasePlayerActivity {

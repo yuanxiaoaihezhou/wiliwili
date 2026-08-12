@@ -13,8 +13,6 @@
         "player_bar": "下方固定显示进度条",
         "low_quality": "低画质解码（以画质为代价换取更低的功耗）",
         "in_memory_cache": "解码缓存",
-        "disk_cache_path": "本地视频缓存路径",
-        "disk_cache_path_hint": "默认: ~/Downloads/wiliwili/cache",
         "hwdec": "硬件解码",
         "auto_play": "视频详情页直接播放",
         "auto_fullscreen": "进入播放页后自动全屏",
@@ -82,6 +80,7 @@
           "header": "界面缩放 (需要重启)",
           "544p": "适合小屏幕",
           "720p": "默认",
+          "800p": "掌机 16:10（800p）",
           "900p": "适合大屏幕",
           "1080p": "适合超大屏幕"
         },
@@ -133,6 +132,15 @@
         "release": "检查更新",
         "config_dir": "配置目录",
         "config": "打开配置目录"
+      },
+      "download": {
+        "header": "下载",
+        "manager": "下载管理中心",
+        "dir": "下载目录",
+        "dir_hint": "默认: ~/Downloads/wiliwili",
+        "speed": "下载限速 (MB/s)",
+        "speed_hint": "0 表示不限速",
+        "speed_invalid": "下载限速必须是非负数字"
       }
     },
     "about": {
@@ -482,10 +490,42 @@
       "related": "相关回复共{}条",
       "end": "没有更多评论",
       "delete": "删除评论后，评论下所有回复都会被删除\n是否继续?"
+    },
+    "download": {
+      "label": "下载",
+      "not_ready": "下载信息还未准备好，请稍后再试",
+      "already_exists": "这个视频已经在下载列表中",
+      "select_quality": "选择下载画质",
+      "select_audio": "选择下载音质",
+      "source_stream": "源流（音视频合一）",
+      "muxed_audio": "音视频合一源流",
+      "queued": "已加入下载队列",
+      "completed": "下载完成",
+      "no_audio": "无独立音轨"
     }
   },
   "dialog": {
     "not_supported": "不支持此功能",
     "quit_hint": "正在退出应用..."
+  },
+  "download_manager": {
+    "title": "下载管理",
+    "hint": "点击任务可暂停、继续、重试、删除或显示保存路径。下载会保留 source.json、info.json、封面与弹幕；若系统有 ffmpeg，DASH 音视频会自动无损合并为 video.mp4。",
+    "status": {
+      "queued": "等待中",
+      "downloading": "下载中",
+      "paused": "已暂停",
+      "completed": "已完成",
+      "failed": "失败",
+      "cancelled": "已取消"
+    },
+    "pause": "暂停",
+    "resume": "继续",
+    "cancel": "取消任务",
+    "retry": "重试",
+    "show_path": "显示保存路径",
+    "delete": "删除",
+    "delete_confirm": "确认删除任务和已下载文件？",
+    "empty": "暂无下载任务"
   }
 }

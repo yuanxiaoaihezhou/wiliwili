@@ -13,6 +13,7 @@
 
 #include "utils/config_helper.hpp"
 #include "utils/activity_helper.hpp"
+#include "utils/download_manager.hpp"
 #include "view/mpv_core.hpp"
 
 #ifdef IOS
@@ -35,6 +36,9 @@ int main(int argc, char* argv[]) {
 
     // Load cookies and settings
     ProgramConfig::instance().init();
+
+    // Restore download queue before the UI is created. Interrupted active tasks are kept paused.
+    DownloadManager::instance().loadState();
 
     // Init the app and i18n
     if (!brls::Application::init()) {

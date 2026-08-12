@@ -179,13 +179,14 @@ std::unordered_map<SettingItem, ProgramOption> ProgramConfig::SETTING_MAP = {
 #endif
     {SettingItem::APP_THEME, {"app_theme", {"auto", "light", "dark"}, {}, 0}},
     {SettingItem::APP_RESOURCES, {"app_resources", {}, {}, 0}},
-    {SettingItem::APP_UI_SCALE, {"app_ui_scale", {"544p", "720p", "900p", "1080p"}, {}, WILI_UI_SCALE_DEFAULT}},
+    {SettingItem::APP_UI_SCALE, {"app_ui_scale", {"544p", "720p", "800p", "900p", "1080p"}, {}, WILI_UI_SCALE_DEFAULT}},
     {SettingItem::KEYMAP, {"keymap", {"xbox", "ps", "keyboard"}, {}, 0}},
     {SettingItem::HOME_WINDOW_STATE, {"home_window_state", {}, {}, 0}},
     {SettingItem::DLNA_IP, {"dlna_ip", {}, {}, 0}},
     {SettingItem::DLNA_NAME, {"dlna_name", {}, {}, 0}},
     {SettingItem::PLAYER_ASPECT, {"player_aspect", {"-1", "-2", "-3", "4:3", "16:9"}, {}, 0}},
-    {SettingItem::PLAYER_DISK_CACHE_PATH, {"player_disk_cache_path", {}, {}, 0}},
+    {SettingItem::VIDEO_DOWNLOAD_PATH, {"video_download_path", {}, {}, 0}},
+    {SettingItem::DOWNLOAD_SPEED_LIMIT, {"download_speed_limit", {}, {}, 0}},
     {SettingItem::HTTP_PROXY, {"http_proxy", {}, {}, 0}},
     {SettingItem::DANMAKU_STYLE_FONT, {"danmaku_style_font", {"stroke", "incline", "shadow", "pure"}, {}, 0}},
     {SettingItem::SHORTCUT_REFRESH, {"shortcut_refresh", {}, {}, 0}},
@@ -535,6 +536,37 @@ void ProgramConfig::load() {
         brls::Logger::info("Load config from: {}", path);
     }
 
+    // Migrate the old PR's mpv disk-cache setting: it is not an offline download directory.
+    bool migratedConfig = false;
+    if (setting.contains("player_disk_cache_path")) {
+        setting.erase("player_disk_cache_path");
+        migratedConfig = true;
+    }
+
+#ifdef __linux__
+    // Legion Go's panel is 16:10. Apply handheld defaults before layout initialization so they
+    // take effect on the first launch instead of only after the next restart.
+    if (isSteamOSRuntime() && isLegionGoDevice()) {
+        if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_SCALE].key)) {
+            setSettingItem(SettingItem::APP_UI_SCALE, std::string{"800p"}, false);
+            migratedConfig = true;
+        }
+        if (!setting.contains(SETTING_MAP[SettingItem::FULLSCREEN].key)) {
+            setSettingItem(SettingItem::FULLSCREEN, true, false);
+            migratedConfig = true;
+        }
+        if (!setting.contains(SETTING_MAP[SettingItem::PLAYER_OSD_TV_MODE].key)) {
+            setSettingItem(SettingItem::PLAYER_OSD_TV_MODE, true, false);
+            migratedConfig = true;
+        }
+        if (!setting.contains(SETTING_MAP[SettingItem::KEYMAP].key)) {
+            setSettingItem(SettingItem::KEYMAP, std::string{"xbox"}, false);
+            migratedConfig = true;
+        }
+    }
+#endif
+    if (migratedConfig) save();
+
     // 初始化代理
     // 默认加载环境变量
     const char* http_proxy  = getenv("http_proxy");
@@ -581,6 +613,9 @@ void ProgramConfig::load() {
     } else if (UIScale == "720p") {
         brls::Application::ORIGINAL_WINDOW_WIDTH  = 1280;
         brls::Application::ORIGINAL_WINDOW_HEIGHT = 720;
+    } else if (UIScale == "800p") {
+        brls::Application::ORIGINAL_WINDOW_WIDTH  = 1280;
+        brls::Application::ORIGINAL_WINDOW_HEIGHT = 800;
     } else if (UIScale == "900p") {
         brls::Application::ORIGINAL_WINDOW_WIDTH  = 1600;
         brls::Application::ORIGINAL_WINDOW_HEIGHT = 900;
@@ -1107,25 +1142,6 @@ void ProgramConfig::init() {
 
     // load config from disk
     this->load();
-
-    bool shouldSave = false;
-#ifdef __linux__
-    if (isSteamOSRuntime() && isLegionGoDevice()) {
-        if (!setting.contains(SETTING_MAP[SettingItem::APP_UI_SCALE].key)) {
-            setSettingItem(SettingItem::APP_UI_SCALE, std::string{"900p"}, false);
-            shouldSave = true;
-        }
-        if (!setting.contains(SETTING_MAP[SettingItem::FULLSCREEN].key)) {
-            setSettingItem(SettingItem::FULLSCREEN, true, false);
-            shouldSave = true;
-        }
-    }
-#endif
-    if (!setting.contains(SETTING_MAP[SettingItem::PLAYER_DISK_CACHE_PATH].key)) {
-        setSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, getHomePath() + "/Downloads/wiliwili/cache", false);
-        shouldSave = true;
-    }
-    if (shouldSave) save();
 
     // init custom font path
     brls::FontLoader::USER_FONT_PATH = getConfigDir() + "/font.ttf";

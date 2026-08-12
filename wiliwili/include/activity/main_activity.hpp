@@ -34,5 +34,6 @@ public:
 private:
     BRLS_BIND(CustomButton, settingBtn, "main/setting");
     BRLS_BIND(CustomButton, inboxBtn, "main/inbox");
+    BRLS_BIND(CustomButton, downloadBtn, "main/download");
     BRLS_BIND(AutoTabFrame, tabFrame, "main/tabFrame");
 };

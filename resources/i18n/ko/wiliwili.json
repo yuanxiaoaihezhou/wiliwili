@@ -13,8 +13,6 @@
         "player_bar": "진행 표시줄 항상 표시",
         "low_quality": "낮은 품질의 디코딩(CPU 사용량이 적음)",
         "in_memory_cache": "메모리 캐시",
-        "disk_cache_path": "로컬 비디오 캐시 경로",
-        "disk_cache_path_hint": "기본값: ~/Downloads/wiliwili/cache",
         "hwdec": "하드웨어 디코드",
         "auto_play": "비디오 세부 정보 페이지에서 자동 재생",
         "auto_fullscreen": "플레이어 진입 시 자동 전체 화면",
@@ -82,6 +80,7 @@
           "header": "UI 스케일 (재시작 필요)",
           "544p": "544p",
           "720p": "720p",
+          "800p": "Handheld 16:10 (800p)",
           "900p": "900p",
           "1080p": "1080p"
         },
@@ -133,6 +132,15 @@
         "release": "업데이트 확인",
         "config_dir": "구성 디렉터리",
         "config": "구성 디렉터리 열기"
+      },
+      "download": {
+        "header": "Downloads",
+        "manager": "Download Manager",
+        "dir": "Download directory",
+        "dir_hint": "Default: ~/Downloads/wiliwili",
+        "speed": "Download speed limit (MB/s)",
+        "speed_hint": "0 means unlimited",
+        "speed_invalid": "Download speed limit must be a non-negative number"
       }
     },
     "about": {
@@ -482,10 +490,42 @@
       "related": "총 {} 개의 답글",
       "end": "댓글이 더 이상 없음",
       "delete": "댓글을 삭제하면 해당 댓글 아래의 모든 답글이 삭제됩니다.\n\n계속하겠습니까?"
+    },
+    "download": {
+      "label": "Download",
+      "not_ready": "Download information is not ready yet. Try again in a moment.",
+      "already_exists": "This video is already in the download list.",
+      "select_quality": "Select video quality",
+      "select_audio": "Select audio quality",
+      "source_stream": "Source stream (muxed A/V)",
+      "muxed_audio": "Muxed source audio/video",
+      "queued": "Added to download queue",
+      "completed": "Download completed",
+      "no_audio": "No separate audio track"
     }
   },
   "dialog": {
     "not_supported": "지원하지 않음",
     "quit_hint": "앱 종료 중..."
+  },
+  "download_manager": {
+    "title": "Download Manager",
+    "hint": "Select a task to pause, resume, retry, delete, or show its save path. Downloads keep source.json, info.json, cover art, and danmaku; if ffmpeg is available, DASH video/audio are losslessly muxed into video.mp4.",
+    "status": {
+      "queued": "Queued",
+      "downloading": "Downloading",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel task",
+    "retry": "Retry",
+    "show_path": "Show save path",
+    "delete": "Delete",
+    "delete_confirm": "Delete this task and downloaded files?",
+    "empty": "No download tasks"
   }
 }

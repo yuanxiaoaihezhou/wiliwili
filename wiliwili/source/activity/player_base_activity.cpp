@@ -3,6 +3,9 @@
 //
 
 #include <utility>
+#include <algorithm>
+#include <map>
+#include <set>
 #include <borealis/core/thread.hpp>
 #include <borealis/core/touch/tap_gesture.hpp>
 #include <borealis/views/applet_frame.hpp>
@@ -13,6 +16,7 @@
 #include "fragment/player_coin.hpp"
 #include "fragment/player_single_comment.hpp"
 #include "utils/config_helper.hpp"
+#include "utils/download_manager.hpp"
 #include "utils/dialog_helper.hpp"
 #include "utils/number_helper.hpp"
 #include "presenter/comment_related.hpp"
@@ -282,6 +286,12 @@ void BasePlayerActivity::setCommonData() {
     this->btnFavorite->getParent()->addGestureRecognizer(
         new brls::TapGestureRecognizer(this->btnFavorite->getParent()));
 
+    this->btnDownload->getParent()->addGestureRecognizer(new brls::TapGestureRecognizer(this->btnDownload->getParent()));
+    this->btnDownload->getParent()->registerClickAction([this](...) {
+        this->showDownloadDialog();
+        return true;
+    });
+
     this->videoUserInfo->addGestureRecognizer(new brls::TapGestureRecognizer(this->videoUserInfo));
 
     this->setRelationButton(false, false, false);
@@ -396,6 +406,285 @@ void BasePlayerActivity::setCommonData() {
     if (brls::Application::ORIGINAL_WINDOW_HEIGHT < 720) video->hideStatusLabel();
 
     video->hideOSDLockButton();
+}
+
+
+namespace {
+std::string downloadQualityDesc(const bilibili::VideoUrlResult& result, int quality) {
+    for (size_t i = 0; i < result.accept_quality.size() && i < result.accept_description.size(); ++i) {
+        if (result.accept_quality[i] == quality) return result.accept_description[i];
+    }
+    return std::to_string(quality);
+}
+
+std::vector<std::string> mediaUrls(const bilibili::DashMedia& media) {
+    std::vector<std::string> urls;
+    if (!media.base_url.empty()) urls.push_back(media.base_url);
+    urls.insert(urls.end(), media.backup_url.begin(), media.backup_url.end());
+    return urls;
+}
+
+std::string audioLabel(const bilibili::DashMedia& media, const std::string& kind = "") {
+    std::string base;
+    if (!kind.empty()) base = kind;
+    else if (media.id == 30280) base = "192K";
+    else if (media.id == 30232) base = "132K";
+    else if (media.id == 30216) base = "64K";
+    else base = fmt::format("Audio {}", media.id);
+    if (media.bandwidth > 0) base += fmt::format(" · {} kbps", media.bandwidth / 1000);
+    return base;
+}
+
+BaseDropdown* makeDownloadDropdown(const std::string& title, const std::vector<std::string>& values,
+                                   ValueSelectedEvent::Callback callback) {
+    auto* dropdown = new BaseDropdown(title, std::move(callback), 0);
+    dropdown->getRecyclingList()->registerCell("Cell", []() {
+        auto* cell = new GridRadioCell();
+        cell->setHeight(brls::Application::getStyle()["brls/dropdown/listItemHeight"]);
+        cell->title->setFontSize(brls::Application::getStyle()["brls/dropdown/listItemTextSize"]);
+        return cell;
+    });
+    dropdown->setDataSource(new TextDataSourceDropdown(values, dropdown));
+    return dropdown;
+}
+
+bool showDownloadAudioDropdown(DownloadTask base, const bilibili::VideoUrlResult& result, int quality) {
+    std::vector<bilibili::DashMedia> videos;
+    for (const auto& media : result.dash.video) {
+        if (media.id == quality && !media.base_url.empty()) videos.push_back(media);
+    }
+    if (videos.empty()) return false;
+
+    bilibili::DashMedia videoMedia = videos.front();
+    for (const auto& media : videos) {
+        const bool mediaPreferred = media.codecid == BILI::VIDEO_CODEC;
+        const bool currentPreferred = videoMedia.codecid == BILI::VIDEO_CODEC;
+        if ((mediaPreferred && !currentPreferred) ||
+            (mediaPreferred == currentPreferred && media.bandwidth > videoMedia.bandwidth)) {
+            videoMedia = media;
+        }
+    }
+
+    struct AudioChoice { bilibili::DashMedia media; std::string label; };
+    std::vector<AudioChoice> choices;
+    std::set<std::string> unique;
+    auto append = [&](const bilibili::DashMedia& media, const std::string& kind = "") {
+        if (media.base_url.empty()) return;
+        std::string key = std::to_string(media.id) + ":" + std::to_string(media.codecid) + ":" + media.base_url;
+        if (!unique.insert(key).second) return;
+        choices.push_back({media, audioLabel(media, kind)});
+    };
+    if (result.dash.has_flac) append(result.dash.flac_audio, "wiliwili/setting/app/playback/hi_res"_i18n);
+    const std::string dolbyLabel = "wiliwili/setting/app/playback/dolby"_i18n;
+    for (const auto& media : result.dash.dolby_audio) append(media, dolbyLabel);
+    auto standard = result.dash.audio;
+    std::stable_sort(standard.begin(), standard.end(), [](const auto& a, const auto& b) {
+        return a.bandwidth > b.bandwidth;
+    });
+    for (const auto& media : standard) append(media);
+
+    const auto qualityDesc = downloadQualityDesc(result, quality);
+    auto enqueue = [base, videoMedia, quality, qualityDesc](const bilibili::DashMedia* audioMedia,
+                                                            const std::string& selectedAudio) mutable {
+        DownloadTask task = base;
+        task.is_dash = true;
+        task.quality = quality;
+        task.quality_desc = qualityDesc;
+        task.video_codec_id = videoMedia.codecid;
+        task.video_bandwidth = videoMedia.bandwidth;
+        task.video_width = videoMedia.width;
+        task.video_height = videoMedia.height;
+        task.video_urls = mediaUrls(videoMedia);
+        task.audio_desc = selectedAudio;
+        if (audioMedia) {
+            task.audio_id = audioMedia->id;
+            task.audio_codec_id = audioMedia->codecid;
+            task.audio_bandwidth = audioMedia->bandwidth;
+            task.audio_urls = mediaUrls(*audioMedia);
+        }
+        DownloadManager::instance().addTask(std::move(task));
+        brls::Application::notify("wiliwili/player/download/queued"_i18n);
+    };
+
+    if (choices.empty()) {
+        enqueue(nullptr, "wiliwili/player/download/no_audio"_i18n);
+        return true;
+    }
+
+    std::vector<std::string> audioLabels;
+    audioLabels.reserve(choices.size());
+    for (const auto& choice : choices) audioLabels.push_back(choice.label);
+    auto* audioDropdown = makeDownloadDropdown(
+        "wiliwili/player/download/select_audio"_i18n, audioLabels,
+        [enqueue, choices](int audioSelected) mutable {
+            if (audioSelected < 0 || static_cast<size_t>(audioSelected) >= choices.size()) return;
+            const auto& choice = choices[audioSelected];
+            enqueue(&choice.media, choice.label);
+        });
+    brls::Application::pushActivity(new brls::Activity(audioDropdown));
+    return true;
+}
+}
+
+void BasePlayerActivity::showDownloadDialog() {
+    if (videoUrlResult.dash.video.empty() && videoUrlResult.durl.empty()) {
+        brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+        return;
+    }
+
+    DownloadTask base;
+    if (dynamic_cast<PlayerSeasonActivity*>(this)) {
+        base.is_pgc = true;
+        base.bvid = episodeResult.bvid;
+        base.cid = episodeResult.cid;
+        base.aid = episodeResult.aid;
+        base.title = seasonInfo.season_title;
+        if (!episodeResult.title.empty()) base.title += " - " + episodeResult.title;
+        if (!episodeResult.long_title.empty()) base.title += " " + episodeResult.long_title;
+        base.owner_name = seasonInfo.up_info.uname;
+        base.cover_url = seasonInfo.cover;
+        base.source_page_url = episodeResult.link.empty()
+            ? ("https://www.bilibili.com/bangumi/play/ep" + std::to_string(episodeResult.id))
+            : episodeResult.link;
+    } else {
+        base.bvid = videoDetailResult.bvid;
+        base.cid = videoDetailPage.cid;
+        base.aid = videoDetailResult.aid;
+        base.title = videoDetailResult.title;
+        if (videoDetailResult.pages.size() > 1 && !videoDetailPage.part.empty()) base.title += " - " + videoDetailPage.part;
+        base.owner_name = videoDetailResult.owner.name;
+        base.cover_url = videoDetailResult.pic;
+        base.source_page_url = "https://www.bilibili.com/video/" + videoDetailResult.bvid;
+        if (videoDetailPage.page > 1) base.source_page_url += "?p=" + std::to_string(videoDetailPage.page);
+    }
+
+    if ((!base.is_pgc && base.bvid.empty()) || base.cid == 0) {
+        brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+        return;
+    }
+
+    for (const auto& existing : DownloadManager::instance().getTasksSnapshot()) {
+        if (existing.bvid == base.bvid && existing.cid == base.cid &&
+            existing.status != DownloadTaskStatus::FAILED && existing.status != DownloadTaskStatus::CANCELLED) {
+            brls::Application::notify("wiliwili/player/download/already_exists"_i18n);
+            return;
+        }
+    }
+
+    // Legacy FLV: audio and video are muxed by the source, so expose a single explicit source-stream choice.
+    if (videoUrlResult.dash.video.empty()) {
+        auto* dialog = new brls::Dialog("wiliwili/player/download/select_quality"_i18n);
+        dialog->addButton("wiliwili/player/download/source_stream"_i18n, [this, base]() mutable {
+            auto* audioDialog = new brls::Dialog("wiliwili/player/download/select_audio"_i18n);
+            audioDialog->addButton("wiliwili/player/download/muxed_audio"_i18n, [this, base]() mutable {
+                DownloadTask task = base;
+                task.is_dash = false;
+                task.quality = videoUrlResult.quality;
+                task.quality_desc = downloadQualityDesc(videoUrlResult, videoUrlResult.quality);
+                task.audio_desc = "wiliwili/player/download/muxed_audio"_i18n;
+                for (const auto& d : videoUrlResult.durl) {
+                    FlvSegment seg;
+                    seg.url = d.url;
+                    seg.backup_urls = d.backup_url;
+                    seg.size = d.size > 0 ? static_cast<uint64_t>(d.size) : 0;
+                    seg.order = d.order;
+                    task.flv_segments.push_back(std::move(seg));
+                }
+                DownloadManager::instance().addTask(std::move(task));
+                brls::Application::notify("wiliwili/player/download/queued"_i18n);
+            });
+            audioDialog->addButton("hints/cancel"_i18n, []() {});
+            audioDialog->open();
+        });
+        dialog->addButton("hints/cancel"_i18n, []() {});
+        dialog->open();
+        return;
+    }
+
+    // Keep every quality reported by the API. The current play-url response may omit streams
+    // above the playback quality, so a missing selected representation is fetched on demand.
+    std::map<int, bilibili::DashMedia> preferred;
+    for (const auto& media : videoUrlResult.dash.video) {
+        auto it = preferred.find(media.id);
+        if (it == preferred.end()) {
+            preferred[media.id] = media;
+            continue;
+        }
+        const bool mediaPreferred = media.codecid == BILI::VIDEO_CODEC;
+        const bool currentPreferred = it->second.codecid == BILI::VIDEO_CODEC;
+        if ((mediaPreferred && !currentPreferred) ||
+            (mediaPreferred == currentPreferred && media.bandwidth > it->second.bandwidth)) {
+            it->second = media;
+        }
+    }
+
+    std::vector<int> qualities;
+    std::set<int> seen;
+    for (int q : videoUrlResult.accept_quality) {
+        if (seen.insert(q).second) qualities.push_back(q);
+    }
+    for (const auto& [q, _] : preferred) {
+        if (seen.insert(q).second) qualities.push_back(q);
+    }
+    if (qualities.empty()) {
+        brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+        return;
+    }
+
+    std::vector<std::string> qualityLabels;
+    qualityLabels.reserve(qualities.size());
+    for (int q : qualities) {
+        std::string label = downloadQualityDesc(videoUrlResult, q);
+        auto it = preferred.find(q);
+        if (it != preferred.end() && it->second.width > 0 && it->second.height > 0) {
+            label += fmt::format(" · {}x{}", it->second.width, it->second.height);
+        }
+        qualityLabels.push_back(std::move(label));
+    }
+
+    auto* qualityDropdown = makeDownloadDropdown(
+        "wiliwili/player/download/select_quality"_i18n, qualityLabels,
+        [this, base, preferred, qualities](int selected) mutable {
+            if (selected < 0 || static_cast<size_t>(selected) >= qualities.size()) return;
+            const int quality = qualities[selected];
+
+            if (preferred.count(quality) != 0) {
+                if (!showDownloadAudioDropdown(base, videoUrlResult, quality))
+                    brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+                return;
+            }
+
+            // The player may have requested a lower qn, so fetch the selected quality without
+            // changing current playback. Keep this activity alive until the request resolves.
+            ASYNC_RETAIN
+            auto success = [ASYNC_TOKEN, base, quality](const bilibili::VideoUrlResult& result) mutable {
+                brls::sync([ASYNC_TOKEN, base, quality, result]() mutable {
+                    ASYNC_RELEASE
+                    if (!showDownloadAudioDropdown(base, result, quality))
+                        brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+                });
+            };
+            auto failure = [ASYNC_TOKEN](BILI_ERR) {
+                brls::sync([ASYNC_TOKEN]() {
+                    ASYNC_RELEASE
+                    brls::Application::notify("wiliwili/player/download/not_ready"_i18n);
+                });
+            };
+            if (base.is_pgc) {
+                BILI::get_season_url(base.cid, quality,
+                    [success](const bilibili::SeasonUrlResult& result) { success(result.video_info); }, failure);
+            } else {
+                BILI::get_video_url(base.bvid, base.cid, quality, success, failure);
+            }
+        });
+
+    // Match the existing quality selector's touch behavior: open the dropdown on the UI queue.
+    ASYNC_RETAIN
+    brls::sync([ASYNC_TOKEN, qualityDropdown]() {
+        ASYNC_RELEASE
+        brls::Application::pushActivity(new brls::Activity(qualityDropdown));
+    });
+
 }
 
 void BasePlayerActivity::showCollectionDialog(uint64_t id, int videoType) {

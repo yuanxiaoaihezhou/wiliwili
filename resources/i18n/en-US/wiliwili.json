@@ -13,8 +13,6 @@
         "player_bar": "Always show progress bar",
         "low_quality": "Low quality decoding (with less CPU usage)",
         "in_memory_cache": "Inmemory cache",
-        "disk_cache_path": "Local video cache path",
-        "disk_cache_path_hint": "Default: ~/Downloads/wiliwili/cache",
         "hwdec": "Hardware decode",
         "auto_play": "Auto-play on video detail page",
         "auto_fullscreen": "Auto fullscreen when entering player",
@@ -82,6 +80,7 @@
           "header": "UI Scale (restart required)",
           "544p": "544p",
           "720p": "720p",
+          "800p": "Handheld 16:10 (800p)",
           "900p": "900p",
           "1080p": "1080p"
         },
@@ -133,6 +132,15 @@
         "release": "Check for updates",
         "config_dir": "Config directory",
         "config": "Open config directory"
+      },
+      "download": {
+        "header": "Downloads",
+        "manager": "Download Manager",
+        "dir": "Download directory",
+        "dir_hint": "Default: ~/Downloads/wiliwili",
+        "speed": "Download speed limit (MB/s)",
+        "speed_hint": "0 means unlimited",
+        "speed_invalid": "Download speed limit must be a non-negative number"
       }
     },
     "about": {
@@ -482,10 +490,42 @@
       "related": "{} replies in total",
       "end": "No more comments",
       "delete": "After deleting the comment, all replies under the comment will be deleted\n\nDo you want to continue?"
+    },
+    "download": {
+      "label": "Download",
+      "not_ready": "Download information is not ready yet. Try again in a moment.",
+      "already_exists": "This video is already in the download list.",
+      "select_quality": "Select video quality",
+      "select_audio": "Select audio quality",
+      "source_stream": "Source stream (muxed A/V)",
+      "muxed_audio": "Muxed source audio/video",
+      "queued": "Added to download queue",
+      "completed": "Download completed",
+      "no_audio": "No separate audio track"
     }
   },
   "dialog": {
     "not_supported": "Not Supported",
     "quit_hint": "Exiting app..."
+  },
+  "download_manager": {
+    "title": "Download Manager",
+    "hint": "Select a task to pause, resume, retry, delete, or show its save path. Downloads keep source.json, info.json, cover art, and danmaku; if ffmpeg is available, DASH video/audio are losslessly muxed into video.mp4.",
+    "status": {
+      "queued": "Queued",
+      "downloading": "Downloading",
+      "paused": "Paused",
+      "completed": "Completed",
+      "failed": "Failed",
+      "cancelled": "Cancelled"
+    },
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancel": "Cancel task",
+    "retry": "Retry",
+    "show_path": "Show save path",
+    "delete": "Delete",
+    "delete_confirm": "Delete this task and downloaded files?",
+    "empty": "No download tasks"
   }
 }

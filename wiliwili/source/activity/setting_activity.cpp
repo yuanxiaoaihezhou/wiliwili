@@ -13,6 +13,7 @@
 
 #include "bilibili.h"
 #include "activity/setting_activity.hpp"
+#include "utils/download_manager.hpp"
 #include "activity/search_activity_tv.hpp"
 #include "activity/hint_activity.hpp"
 #include "fragment/setting_network.hpp"
@@ -212,6 +213,39 @@ void SettingActivity::onContentAvailable() {
 #endif
         return true;
     });
+
+    btnDownloadManager->registerClickAction([](...) -> bool {
+        Intent::openDownloadManager();
+        return true;
+    });
+
+    auto downloadDir = DownloadManager::defaultDownloadDir();
+    btnDownloadDir->init(
+        "wiliwili/setting/tools/download/dir"_i18n, downloadDir,
+        [](const std::string& data) {
+            std::string path = pystring::strip(data);
+            ProgramConfig::instance().setSettingItem(SettingItem::VIDEO_DOWNLOAD_PATH, path);
+        },
+        "wiliwili/setting/tools/download/dir_hint"_i18n,
+        "wiliwili/setting/tools/download/dir_hint"_i18n, 512);
+
+    auto speedLimit = ProgramConfig::instance().getSettingItem(SettingItem::DOWNLOAD_SPEED_LIMIT, std::string{"0"});
+    btnDownloadSpeed->init(
+        "wiliwili/setting/tools/download/speed"_i18n, speedLimit,
+        [](const std::string& data) {
+            std::string value = pystring::strip(data);
+            if (value.empty()) value = "0";
+            try {
+                double v = std::stod(value);
+                if (v < 0) value = "0";
+            } catch (...) {
+                brls::Application::notify("wiliwili/setting/tools/download/speed_invalid"_i18n);
+                return;
+            }
+            ProgramConfig::instance().setSettingItem(SettingItem::DOWNLOAD_SPEED_LIMIT, value);
+        },
+        "wiliwili/setting/tools/download/speed_hint"_i18n,
+        "wiliwili/setting/tools/download/speed_hint"_i18n, 32);
 
     btnTutorialFont->registerClickAction([](...) -> bool {
         auto dialog =
@@ -483,6 +517,7 @@ void SettingActivity::onContentAvailable() {
                           {
                               "wiliwili/setting/app/others/scale/544p"_i18n,
                               "wiliwili/setting/app/others/scale/720p"_i18n,
+                              "wiliwili/setting/app/others/scale/800p"_i18n,
                               "wiliwili/setting/app/others/scale/900p"_i18n,
                               "wiliwili/setting/app/others/scale/1080p"_i18n,
                           },
@@ -645,20 +680,6 @@ void SettingActivity::onContentAvailable() {
                                MPVCore::INMEMORY_CACHE = inmemoryOption.rawOptionList[data];
                                MPVCore::instance().restart();
                            });
-
-    auto defaultDiskCachePath = conf.getHomePath() + "/Downloads/wiliwili/cache";
-    auto diskCachePath =
-        conf.getSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, defaultDiskCachePath);
-    btnDiskCachePath->init(
-        "wiliwili/setting/app/playback/disk_cache_path"_i18n, diskCachePath,
-        [defaultDiskCachePath](const std::string& data) {
-            std::string cachePath = pystring::strip(data);
-            if (cachePath.empty()) cachePath = defaultDiskCachePath;
-            ProgramConfig::instance().setSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, cachePath);
-            MPVCore::instance().restart();
-        },
-        "wiliwili/setting/app/playback/disk_cache_path_hint"_i18n,
-        "wiliwili/setting/app/playback/disk_cache_path_hint"_i18n, 256);
 
     /// TLS verify
     btnTls->init("wiliwili/setting/app/network/tls"_i18n, conf.getBoolOption(SettingItem::TLS_VERIFY), [](bool data) {

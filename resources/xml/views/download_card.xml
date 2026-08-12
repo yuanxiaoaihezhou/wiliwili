@@ -1,0 +1,22 @@
+<brls:Box
+        focusable="true"
+        wireframe="false"
+        axis="row"
+        width="100%"
+        height="118"
+        padding="14"
+        cornerRadius="12"
+        backgroundColor="@theme/brls/backdrop"
+        alignItems="center">
+    <brls:Box axis="column" grow="1" height="auto" justifyContent="center">
+        <brls:Label id="download/title" fontSize="20" singleLine="true" width="100%"/>
+        <brls:Label id="download/meta" fontSize="14" textColor="@theme/font/grey" singleLine="true" marginTop="5" width="100%"/>
+        <brls:Label id="download/progress" fontSize="14" textColor="@theme/font/grey" singleLine="true" marginTop="4" width="100%"/>
+    </brls:Box>
+    <brls:Label
+            id="download/status"
+            width="150"
+            horizontalAlign="right"
+            fontSize="16"
+            marginLeft="18"/>
+</brls:Box>

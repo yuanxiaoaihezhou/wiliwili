@@ -39,6 +39,9 @@ private:
     BRLS_BIND(brls::RadioCell, btnReleaseChecker, "tools/release_checker");
     BRLS_BIND(brls::RadioCell, btnQuit, "tools/quit");
     BRLS_BIND(brls::RadioCell, btnOpenConfig, "tools/config_dir");
+    BRLS_BIND(brls::RadioCell, btnDownloadManager, "tools/download_manager");
+    BRLS_BIND(brls::InputCell, btnDownloadDir, "tools/download_dir");
+    BRLS_BIND(brls::InputCell, btnDownloadSpeed, "tools/download_speed");
     BRLS_BIND(brls::RadioCell, btnVibrationTest, "tools/vibration_test");
     BRLS_BIND(brls::RadioCell, btnDLNA, "tools/dlna");
     BRLS_BIND(brls::BooleanCell, btnTls, "setting/network/tls");
@@ -58,7 +61,6 @@ private:
     BRLS_BIND(brls::BooleanCell, btnAutoPlay, "setting/video/auto_play");
     BRLS_BIND(brls::BooleanCell, btnAutoFullscreen, "setting/video/auto_fullscreen");
     BRLS_BIND(BiliSelectorCell, selectorInmemory, "setting/video/inmemory");
-    BRLS_BIND(brls::InputCell, btnDiskCachePath, "setting/video/disk_cache_path");
     BRLS_BIND(BiliSelectorCell, selectorFormat, "setting/video/format");
     BRLS_BIND(BiliSelectorCell, selectorCodec, "setting/video/codec");
     BRLS_BIND(BiliSelectorCell, selectorQuality, "setting/audio/quality");

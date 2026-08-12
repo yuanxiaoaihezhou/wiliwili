@@ -13,8 +13,6 @@
         "player_bar": "下方固定顯示進度條",
         "low_quality": "低畫質解碼（以畫質為代價換取更低的功耗）",
         "in_memory_cache": "解码緩存",
-        "disk_cache_path": "本地影片快取路徑",
-        "disk_cache_path_hint": "預設: ~/Downloads/wiliwili/cache",
         "hwdec": "硬體解碼",
         "auto_play": "影片詳細頁直接播放",
         "auto_fullscreen": "進入播放頁後自動全屏",
@@ -82,6 +80,7 @@
           "header": "介面縮放 (需要重啟)",
           "544p": "適合小荧幕",
           "720p": "預設",
+          "800p": "掌機 16:10（800p）",
           "900p": "適合大荧幕",
           "1080p": "適合超大荧幕"
         },
@@ -133,6 +132,15 @@
         "release": "檢查更新",
         "config_dir": "設定檔目錄",
         "config": "開啟設定檔目錄"
+      },
+      "download": {
+        "header": "下載",
+        "manager": "下載管理中心",
+        "dir": "下載目錄",
+        "dir_hint": "預設: ~/Downloads/wiliwili",
+        "speed": "下載限速 (MB/s)",
+        "speed_hint": "0 表示不限速",
+        "speed_invalid": "下載限速必須是非負數字"
       }
     },
     "about": {
@@ -482,10 +490,42 @@
       "related": "總共{}個答覆",
       "end": "沒有更多的評論",
       "delete": "删除評論後，將删除評論下的所有回復\n\n是否要繼續？"
+    },
+    "download": {
+      "label": "下載",
+      "not_ready": "下載資訊尚未準備好，請稍後再試",
+      "already_exists": "這個影片已在下載列表中",
+      "select_quality": "選擇下載畫質",
+      "select_audio": "選擇下載音質",
+      "source_stream": "來源串流（影音合一）",
+      "muxed_audio": "影音合一來源串流",
+      "queued": "已加入下載佇列",
+      "completed": "下載完成",
+      "no_audio": "無獨立音軌"
     }
   },
   "dialog": {
     "not_supported": "不支援此功能",
     "quit_hint": "正在退出軟體..."
+  },
+  "download_manager": {
+    "title": "下載管理",
+    "hint": "點擊任務可暫停、繼續、重試、刪除或顯示儲存路徑。下載會保留 source.json、info.json、封面與彈幕；若系統有 ffmpeg，DASH 音視訊會自動無損合併為 video.mp4。",
+    "status": {
+      "queued": "等待中",
+      "downloading": "下載中",
+      "paused": "已暫停",
+      "completed": "已完成",
+      "failed": "失敗",
+      "cancelled": "已取消"
+    },
+    "pause": "暫停",
+    "resume": "繼續",
+    "cancel": "取消任務",
+    "retry": "重試",
+    "show_path": "顯示儲存路徑",
+    "delete": "刪除",
+    "delete_confirm": "確認刪除任務和已下載檔案？",
+    "empty": "暫無下載任務"
   }
 }

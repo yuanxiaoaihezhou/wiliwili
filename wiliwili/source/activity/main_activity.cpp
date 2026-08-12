@@ -63,6 +63,8 @@ void MainActivity::onContentAvailable() {
                 return (brls::View*)this->tabFrame->getActiveTab();
             } else if (direction == brls::FocusDirection::UP) {
                 return (brls::View*)this->tabFrame->getSidebar();
+            } else if (direction == brls::FocusDirection::DOWN) {
+                return (brls::View*)this->downloadBtn;
             }
         } else if (tabFrame->getSideBarPosition() == AutoTabBarPosition::TOP) {
             if (direction == brls::FocusDirection::DOWN) {
@@ -78,18 +80,41 @@ void MainActivity::onContentAvailable() {
             if (direction == brls::FocusDirection::RIGHT) {
                 return (brls::View*)this->tabFrame->getActiveTab();
             } else if (direction == brls::FocusDirection::UP) {
-                return (brls::View*)this->inboxBtn;
+                return (brls::View*)this->downloadBtn;
             }
         } else if (tabFrame->getSideBarPosition() == AutoTabBarPosition::TOP) {
             if (direction == brls::FocusDirection::DOWN) {
                 return (brls::View*)this->tabFrame->getActiveTab();
             } else if (direction == brls::FocusDirection::LEFT) {
-                return (brls::View*)this->inboxBtn;
+                return (brls::View*)this->downloadBtn;
             }
         }
         return (brls::View*)nullptr;
     });
     this->settingBtn->addGestureRecognizer(new brls::TapGestureRecognizer(this->settingBtn));
+
+    this->downloadBtn->registerClickAction([](brls::View*) -> bool {
+        Intent::openDownloadManager();
+        return true;
+    });
+    this->downloadBtn->setCustomNavigation([this](brls::FocusDirection direction) {
+        if (tabFrame->getSideBarPosition() == AutoTabBarPosition::LEFT) {
+            if (direction == brls::FocusDirection::RIGHT) return (brls::View*)this->tabFrame->getActiveTab();
+            if (direction == brls::FocusDirection::UP) return (brls::View*)this->inboxBtn;
+            if (direction == brls::FocusDirection::DOWN) return (brls::View*)this->settingBtn;
+        } else if (tabFrame->getSideBarPosition() == AutoTabBarPosition::TOP) {
+            if (direction == brls::FocusDirection::DOWN) return (brls::View*)this->tabFrame->getActiveTab();
+            if (direction == brls::FocusDirection::LEFT) return (brls::View*)this->inboxBtn;
+            if (direction == brls::FocusDirection::RIGHT) return (brls::View*)this->settingBtn;
+        }
+        return (brls::View*)nullptr;
+    });
+    this->downloadBtn->getFocusEvent()->subscribe([this](bool value) {
+        auto* image = dynamic_cast<SVGImage*>(this->downloadBtn->getChildren()[0]);
+        if (!image) return;
+        image->setImageFromSVGRes(value ? "svg/ico-download-activate.svg" : "svg/ico-download.svg");
+    });
+    this->downloadBtn->addGestureRecognizer(new brls::TapGestureRecognizer(this->downloadBtn));
 
     this->inboxBtn->registerClickAction([](brls::View* view) -> bool {
         if (DialogHelper::checkLogin()) Intent::openInbox();

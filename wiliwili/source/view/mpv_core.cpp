@@ -5,7 +5,6 @@
 #include <cstdlib>
 #include <clocale>
 #include <cmath>
-#include <filesystem>
 #include <pystring.h>
 #include <borealis/core/thread.hpp>
 #include <borealis/core/application.hpp>
@@ -304,21 +303,10 @@ void MPVCore::init() {
         brls::fatal("Error Create mpv Handle");
     }
     std::string confDir = ProgramConfig::instance().getConfigDir();
-    std::string defaultDiskCacheDir = ProgramConfig::instance().getHomePath() + "/Downloads/wiliwili/cache";
-    std::string diskCacheDir =
-        ProgramConfig::instance().getSettingItem(SettingItem::PLAYER_DISK_CACHE_PATH, defaultDiskCacheDir);
-    if (diskCacheDir.empty()) diskCacheDir = defaultDiskCacheDir;
-    std::error_code ec;
-    std::filesystem::create_directories(diskCacheDir, ec);
-    if (ec) {
-        brls::Logger::warning("create disk cache dir failed: {} ({})", diskCacheDir, ec.message());
-    }
     // misc
     mpvSetOptionString(mpv, "config", "yes");
     mpvSetOptionString(mpv, "config-dir", confDir.c_str());
     mpvSetOptionString(mpv, "gpu-shader-cache-dir", fmt::format("{}/cache", confDir).c_str());
-    mpvSetOptionString(mpv, "cache-on-disk", "yes");
-    mpvSetOptionString(mpv, "demuxer-cache-dir", diskCacheDir.c_str());
     mpvSetOptionString(mpv, "ytdl", "no");
     mpvSetOptionString(mpv, "audio-channels", "stereo");
     mpvSetOptionString(mpv, "idle", "yes");

@@ -55,9 +55,6 @@
                             <SelectorCell
                                     id="setting/video/inmemory"/>
 
-                            <brls:InputCell
-                                    id="setting/video/disk_cache_path"/>
-
                         </brls:Box>
                         <brls:Header
                                 width="auto"
@@ -370,6 +367,21 @@
                                     id="tools/vibration_test"
                                     title="@i18n/wiliwili/setting/tools/test/vibration"/>
 
+                        </brls:Box>
+                        <brls:Header
+                                width="auto"
+                                height="auto"
+                                title="@i18n/wiliwili/setting/tools/download/header"
+                                marginBottom="0px"/>
+                        <brls:Box
+                                width="100%"
+                                height="auto"
+                                axis="column"
+                                marginBottom="30px">
+                            <brls:RadioCell id="tools/download_manager"
+                                    title="@i18n/wiliwili/setting/tools/download/manager"/>
+                            <brls:InputCell id="tools/download_dir"/>
+                            <brls:InputCell id="tools/download_speed"/>
                         </brls:Box>
                         <brls:Header
                                 width="auto"

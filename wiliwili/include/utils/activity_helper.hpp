@@ -32,6 +32,9 @@ public:
     // 开启消息盒子
     static void openInbox();
 
+    // 开启下载管理中心
+    static void openDownloadManager();
+
     // switch 应用开启教程
     static void openHint();
 
