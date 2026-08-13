@@ -1,0 +1,32 @@
+<brls:AppletFrame
+        iconInterpolation="linear"
+        headerHidden="true"
+        footerHidden="false">
+    <brls:Box backgroundColor="@theme/brls/background" axis="column" grow="1">
+        <brls:Box
+                height="64"
+                width="100%"
+                alignItems="center"
+                paddingLeft="24"
+                paddingRight="72">
+            <brls:Label
+                    id="download/title"
+                    fontSize="25"
+                    grow="1"/>
+        </brls:Box>
+        <RecyclingGrid
+                id="download/grid"
+                paddingLeft="20"
+                paddingRight="20"
+                paddingBottom="8"
+                grow="1"
+                preFetchLine="2"
+                spanCount="@style/wiliwili/grid/span/4"
+                itemHeight="250"
+                wireframe="false"/>
+        <ButtonClose
+                positionType="absolute"
+                positionTop="2"
+                positionRight="2"/>
+    </brls:Box>
+</brls:AppletFrame>
