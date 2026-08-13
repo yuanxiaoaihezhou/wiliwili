@@ -53,6 +53,25 @@ private:
     void reload();
 };
 
+class DownloadCollectionActivity : public brls::Activity {
+public:
+    CONTENT_FROM_XML_RES("activity/download_collection_activity.xml");
+    DownloadCollectionActivity(std::string groupKey, std::string groupTitle, bool completedOnly)
+        : groupKey(std::move(groupKey)), groupTitle(std::move(groupTitle)), completedOnly(completedOnly) {}
+    ~DownloadCollectionActivity() override;
+    void onContentAvailable() override;
+
+private:
+    std::string groupKey;
+    std::string groupTitle;
+    bool completedOnly = false;
+    BRLS_BIND(RecyclingGrid, grid, "download/grid");
+    BRLS_BIND(brls::Label, titleLabel, "download/title");
+    brls::Event<std::string>::Subscription progressSub;
+    brls::Event<std::string>::Subscription statusSub;
+    void reload();
+};
+
 class OfflineLibraryActivity : public brls::Activity {
 public:
     CONTENT_FROM_XML_RES("activity/offline_library_activity.xml");

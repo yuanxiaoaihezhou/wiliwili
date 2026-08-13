@@ -547,12 +547,12 @@
         },
         "pause": "暫停",
         "resume": "繼續",
-        "cancel": "取消任務",
+        "cancel": "取消下載",
         "retry": "重試",
         "show_path": "顯示儲存路徑",
         "open_folder": "開啟儲存目錄",
-        "delete": "刪除",
-        "delete_confirm": "確認刪除任務和已下載檔案？",
+        "delete": "刪除下載檔案",
+        "delete_confirm": "確認刪除下載任務和本機影片檔案？",
         "empty": "暫無下載任務",
         "play": "離線播放",
         "play_missing": "本機媒體檔案不存在",
@@ -574,6 +574,7 @@
             "done": "可離線播放"
         },
         "source_info": "查看來源資訊",
-        "open_source": "開啟原始頁面"
+        "open_source": "開啟原始頁面",
+        "collection_meta": "{} 個影片 · 已完成 {}/{}"
     }
 }

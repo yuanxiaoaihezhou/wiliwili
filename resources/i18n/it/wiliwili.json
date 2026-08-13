@@ -547,12 +547,12 @@
         },
         "pause": "Pause",
         "resume": "Resume",
-        "cancel": "Cancel task",
+        "cancel": "Cancel download",
         "retry": "Retry",
         "show_path": "Show save path",
         "open_folder": "Apri cartella di salvataggio",
-        "delete": "Delete",
-        "delete_confirm": "Delete this task and downloaded files?",
+        "delete": "Delete downloaded files",
+        "delete_confirm": "Delete this download task and its local media files?",
         "empty": "No download tasks",
         "play": "Play offline",
         "play_missing": "Local media file is missing",
@@ -574,6 +574,7 @@
             "done": "Ready offline"
         },
         "source_info": "Show source info",
-        "open_source": "Open source page"
+        "open_source": "Open source page",
+        "collection_meta": "{} videos · {}/{} completed"
     }
 }

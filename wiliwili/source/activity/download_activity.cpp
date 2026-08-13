@@ -7,6 +7,7 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <unordered_map>
 #include <fmt/format.h>
 
 #include <borealis/core/application.hpp>
@@ -239,68 +240,248 @@ static void playOfflineTask(const DownloadTask& task) {
     brls::Application::pushActivity(new OfflinePlayerActivity(task));
 }
 
-class DownloadDataSource : public RecyclingGridDataSource {
+
+static std::string downloadTaskGroupKey(const DownloadTask& task) {
+    if (task.dir.empty()) return {};
+    try {
+        const auto parent = cpr::fs::path(task.dir).parent_path().string();
+        if (!parent.empty()) return parent;
+    } catch (...) {}
+    return {};
+}
+
+static DownloadTask makeCollectionDisplayTask(const std::vector<DownloadTask>& children) {
+    DownloadTask display;
+    if (children.empty()) return display;
+
+    display = children.front();
+    display.id = "collection:" + downloadTaskGroupKey(children.front());
+    display.title = children.front().series_title.empty() ? children.front().title : children.front().series_title;
+    display.series_title = display.title;
+    display.part_title.clear();
+    display.quality = 0;
+    display.quality_desc.clear();
+    display.video_codec_id = 0;
+    display.video_bandwidth = 0;
+    display.audio_id = 0;
+    display.audio_desc.clear();
+    display.audio_codec_id = 0;
+    display.audio_bandwidth = 0;
+    display.error_message.clear();
+    display.downloaded_bytes = 0;
+    display.total_bytes = 0;
+    display.audio_downloaded_bytes = 0;
+    display.audio_total_bytes = 0;
+    display.estimated_bytes = 0;
+    display.finished_at = 0;
+
+    size_t completed = 0;
+    const DownloadTask* active = nullptr;
+    const DownloadTask* failed = nullptr;
+    const DownloadTask* paused = nullptr;
+    const DownloadTask* pending = nullptr;
+    const DownloadTask* cancelled = nullptr;
+
+    for (const auto& task : children) {
+        if (display.cover_url.empty() && !task.cover_url.empty()) display.cover_url = task.cover_url;
+        display.downloaded_bytes += std::max<int64_t>(0, task.downloaded_bytes);
+        display.total_bytes += std::max<int64_t>(0, task.total_bytes);
+        display.audio_downloaded_bytes += std::max<int64_t>(0, task.audio_downloaded_bytes);
+        display.audio_total_bytes += std::max<int64_t>(0, task.audio_total_bytes);
+        display.estimated_bytes += std::max<int64_t>(0, DownloadManager::estimateBytes(task));
+        display.finished_at = std::max(display.finished_at, task.finished_at);
+
+        switch (task.status) {
+            case DownloadTaskStatus::COMPLETED: ++completed; break;
+            case DownloadTaskStatus::DOWNLOADING: if (!active) active = &task; break;
+            case DownloadTaskStatus::FAILED: if (!failed) failed = &task; break;
+            case DownloadTaskStatus::PAUSED: if (!paused) paused = &task; break;
+            case DownloadTaskStatus::PENDING: if (!pending) pending = &task; break;
+            case DownloadTaskStatus::CANCELLED: if (!cancelled) cancelled = &task; break;
+        }
+    }
+
+    display.owner_name = fmt::format(
+        fmt::runtime("wiliwili/download_manager/collection_meta"_i18n),
+        children.size(), completed, children.size());
+
+    if (completed == children.size()) {
+        display.status = DownloadTaskStatus::COMPLETED;
+        display.stage = DownloadTaskStage::COMPLETED;
+    } else if (active) {
+        display.status = DownloadTaskStatus::DOWNLOADING;
+        display.stage = active->stage;
+    } else if (failed) {
+        display.status = DownloadTaskStatus::FAILED;
+        display.stage = failed->stage;
+        display.error_message = failed->error_message;
+    } else if (paused) {
+        display.status = DownloadTaskStatus::PAUSED;
+        display.stage = paused->stage;
+    } else if (pending) {
+        display.status = DownloadTaskStatus::PENDING;
+        display.stage = pending->stage;
+    } else {
+        display.status = DownloadTaskStatus::CANCELLED;
+        display.stage = cancelled ? cancelled->stage : DownloadTaskStage::QUEUED;
+    }
+
+    return display;
+}
+
+struct DownloadGridEntry {
+    bool isCollection = false;
+    std::string groupKey;
+    DownloadTask display;
+    std::vector<DownloadTask> children;
+};
+
+static std::vector<DownloadGridEntry> makeDownloadGridEntries(const std::vector<DownloadTask>& tasks) {
+    std::unordered_map<std::string, size_t> counts;
+    for (const auto& task : tasks) {
+        const auto key = downloadTaskGroupKey(task);
+        if (!key.empty()) ++counts[key];
+    }
+
+    std::unordered_map<std::string, bool> emitted;
+    std::vector<DownloadGridEntry> entries;
+    entries.reserve(tasks.size());
+
+    for (const auto& task : tasks) {
+        const auto key = downloadTaskGroupKey(task);
+        const bool isCollection = !key.empty() && counts[key] > 1;
+        if (!isCollection) {
+            DownloadGridEntry entry;
+            entry.display = task;
+            entries.emplace_back(std::move(entry));
+            continue;
+        }
+
+        if (emitted[key]) continue;
+        emitted[key] = true;
+
+        DownloadGridEntry entry;
+        entry.isCollection = true;
+        entry.groupKey = key;
+        for (const auto& child : tasks) {
+            if (downloadTaskGroupKey(child) == key) entry.children.push_back(child);
+        }
+        entry.display = makeCollectionDisplayTask(entry.children);
+        entries.emplace_back(std::move(entry));
+    }
+
+    return entries;
+}
+
+static void showTaskActions(const DownloadTask& task, bool libraryMode) {
+    auto* dialog = new brls::Dialog(task.title.empty() ? task.bvid : task.title);
+
+    // Keep a visible way out at the very top. On handheld screens a long action list used to
+    // push this button and destructive actions below the visible area.
+    dialog->addButton("hints/cancel"_i18n, []() {});
+
+    if (task.status == DownloadTaskStatus::COMPLETED) {
+        dialog->addButton("wiliwili/download_manager/play"_i18n, [task]() { playOfflineTask(task); });
+        dialog->addButton("wiliwili/download_manager/delete"_i18n, [id = task.id, title = task.title]() {
+            auto* confirm = new brls::Dialog(
+                "wiliwili/download_manager/delete_confirm"_i18n +
+                (title.empty() ? "" : "\n" + title));
+            confirm->addButton("hints/cancel"_i18n, []() {});
+            confirm->addButton("wiliwili/download_manager/delete"_i18n,
+                               [id]() { DownloadManager::instance().deleteTask(id); });
+            confirm->open();
+        });
+    } else if (task.status == DownloadTaskStatus::DOWNLOADING) {
+        dialog->addButton("wiliwili/download_manager/pause"_i18n,
+                          [id = task.id]() { DownloadManager::instance().pauseTask(id); });
+        dialog->addButton("wiliwili/download_manager/cancel"_i18n,
+                          [id = task.id]() { DownloadManager::instance().cancelTask(id); });
+    } else if (task.status == DownloadTaskStatus::PAUSED) {
+        dialog->addButton("wiliwili/download_manager/resume"_i18n,
+                          [id = task.id]() { DownloadManager::instance().resumeTask(id); });
+        dialog->addButton("wiliwili/download_manager/cancel"_i18n,
+                          [id = task.id]() { DownloadManager::instance().cancelTask(id); });
+        dialog->addButton("wiliwili/download_manager/delete"_i18n, [id = task.id, title = task.title]() {
+            auto* confirm = new brls::Dialog(
+                "wiliwili/download_manager/delete_confirm"_i18n +
+                (title.empty() ? "" : "\n" + title));
+            confirm->addButton("hints/cancel"_i18n, []() {});
+            confirm->addButton("wiliwili/download_manager/delete"_i18n,
+                               [id]() { DownloadManager::instance().deleteTask(id); });
+            confirm->open();
+        });
+    } else if (task.status == DownloadTaskStatus::FAILED || task.status == DownloadTaskStatus::CANCELLED) {
+        dialog->addButton("wiliwili/download_manager/retry"_i18n,
+                          [id = task.id]() { DownloadManager::instance().retryTask(id); });
+        dialog->addButton("wiliwili/download_manager/delete"_i18n, [id = task.id, title = task.title]() {
+            auto* confirm = new brls::Dialog(
+                "wiliwili/download_manager/delete_confirm"_i18n +
+                (title.empty() ? "" : "\n" + title));
+            confirm->addButton("hints/cancel"_i18n, []() {});
+            confirm->addButton("wiliwili/download_manager/delete"_i18n,
+                               [id]() { DownloadManager::instance().deleteTask(id); });
+            confirm->open();
+        });
+    } else if (task.status == DownloadTaskStatus::PENDING) {
+        dialog->addButton("wiliwili/download_manager/cancel"_i18n,
+                          [id = task.id]() { DownloadManager::instance().cancelTask(id); });
+        dialog->addButton("wiliwili/download_manager/delete"_i18n, [id = task.id, title = task.title]() {
+            auto* confirm = new brls::Dialog(
+                "wiliwili/download_manager/delete_confirm"_i18n +
+                (title.empty() ? "" : "\n" + title));
+            confirm->addButton("hints/cancel"_i18n, []() {});
+            confirm->addButton("wiliwili/download_manager/delete"_i18n,
+                               [id]() { DownloadManager::instance().deleteTask(id); });
+            confirm->open();
+        });
+    }
+
+    if (!libraryMode && (task.status == DownloadTaskStatus::PENDING || task.status == DownloadTaskStatus::PAUSED)) {
+        dialog->addButton("wiliwili/download_manager/move_up"_i18n,
+                          [id = task.id]() { DownloadManager::instance().moveTaskUp(id); });
+        dialog->addButton("wiliwili/download_manager/move_down"_i18n,
+                          [id = task.id]() { DownloadManager::instance().moveTaskDown(id); });
+    }
+    if (!task.dir.empty()) {
+        dialog->addButton("wiliwili/download_manager/open_folder"_i18n, [path = task.dir]() {
+            if (!openLocalDirectory(path)) brls::Application::notify(path);
+        });
+        dialog->addButton("wiliwili/download_manager/source_info"_i18n, [task]() {
+            std::string message = (cpr::fs::path(task.dir) / "source.json").string();
+            if (!task.source_page_url.empty()) message += "\n" + task.source_page_url;
+            brls::Application::notify(message);
+        });
+    }
+    if (!task.source_page_url.empty()) {
+        dialog->addButton("wiliwili/download_manager/open_source"_i18n, [url = task.source_page_url]() {
+            brls::Application::getPlatform()->openBrowser(url);
+        });
+    }
+    if (!task.error_message.empty()) {
+        dialog->addButton("wiliwili/download_manager/show_error"_i18n,
+                          [error = task.error_message]() { brls::Application::notify(error); });
+    }
+    dialog->open();
+}
+
+class DownloadTaskDataSource : public RecyclingGridDataSource {
 public:
-    DownloadDataSource(std::vector<DownloadTask> tasks, bool libraryMode)
+    DownloadTaskDataSource(std::vector<DownloadTask> tasks, bool libraryMode)
         : tasks(std::move(tasks)), libraryMode(libraryMode) {}
 
     size_t getItemCount() override { return tasks.size(); }
+
     RecyclingGridItem* cellForRow(RecyclingGrid* recycler, size_t index) override {
         auto* cell = static_cast<DownloadCard*>(recycler->dequeueReusableCell("Cell"));
         cell->setTask(tasks[index]);
         return cell;
     }
+
     void onItemSelected(RecyclingGrid*, size_t index) override {
         if (index >= tasks.size()) return;
-        const auto task = tasks[index];
-        auto* dialog = new brls::Dialog(task.title.empty() ? task.bvid : task.title);
-        if (task.status == DownloadTaskStatus::COMPLETED) {
-            dialog->addButton("wiliwili/download_manager/play"_i18n, [task]() { playOfflineTask(task); });
-        } else if (task.status == DownloadTaskStatus::DOWNLOADING) {
-            dialog->addButton("wiliwili/download_manager/pause"_i18n, [id = task.id]() { DownloadManager::instance().pauseTask(id); });
-            dialog->addButton("wiliwili/download_manager/cancel"_i18n, [id = task.id]() { DownloadManager::instance().cancelTask(id); });
-        } else if (task.status == DownloadTaskStatus::PAUSED) {
-            dialog->addButton("wiliwili/download_manager/resume"_i18n, [id = task.id]() { DownloadManager::instance().resumeTask(id); });
-            dialog->addButton("wiliwili/download_manager/cancel"_i18n, [id = task.id]() { DownloadManager::instance().cancelTask(id); });
-        } else if (task.status == DownloadTaskStatus::FAILED || task.status == DownloadTaskStatus::CANCELLED) {
-            dialog->addButton("wiliwili/download_manager/retry"_i18n, [id = task.id]() { DownloadManager::instance().retryTask(id); });
-        } else if (task.status == DownloadTaskStatus::PENDING) {
-            dialog->addButton("wiliwili/download_manager/cancel"_i18n, [id = task.id]() { DownloadManager::instance().cancelTask(id); });
-        }
-
-        if (!libraryMode && (task.status == DownloadTaskStatus::PENDING || task.status == DownloadTaskStatus::PAUSED)) {
-            dialog->addButton("wiliwili/download_manager/move_up"_i18n, [id = task.id]() { DownloadManager::instance().moveTaskUp(id); });
-            dialog->addButton("wiliwili/download_manager/move_down"_i18n, [id = task.id]() { DownloadManager::instance().moveTaskDown(id); });
-        }
-        if (!task.dir.empty()) {
-            dialog->addButton("wiliwili/download_manager/open_folder"_i18n, [path = task.dir]() {
-                if (!openLocalDirectory(path)) brls::Application::notify(path);
-            });
-            dialog->addButton("wiliwili/download_manager/source_info"_i18n, [task]() {
-                std::string message = (cpr::fs::path(task.dir) / "source.json").string();
-                if (!task.source_page_url.empty()) message += "\n" + task.source_page_url;
-                brls::Application::notify(message);
-            });
-        }
-        if (!task.source_page_url.empty()) {
-            dialog->addButton("wiliwili/download_manager/open_source"_i18n, [url = task.source_page_url]() {
-                brls::Application::getPlatform()->openBrowser(url);
-            });
-        }
-        if (!task.error_message.empty()) {
-            dialog->addButton("wiliwili/download_manager/show_error"_i18n, [error = task.error_message]() { brls::Application::notify(error); });
-        }
-        if (task.status != DownloadTaskStatus::DOWNLOADING) {
-            dialog->addButton("wiliwili/download_manager/delete"_i18n, [id = task.id, title = task.title]() {
-                auto* confirm = new brls::Dialog("wiliwili/download_manager/delete_confirm"_i18n + (title.empty() ? "" : "\n" + title));
-                confirm->addButton("hints/cancel"_i18n, []() {});
-                confirm->addButton("wiliwili/download_manager/delete"_i18n, [id]() { DownloadManager::instance().deleteTask(id); });
-                confirm->open();
-            });
-        }
-        dialog->addButton("hints/cancel"_i18n, []() {});
-        dialog->open();
+        showTaskActions(tasks[index], libraryMode);
     }
+
     void clearData() override { tasks.clear(); }
 
     bool updateTask(const DownloadTask& task, size_t& index) {
@@ -318,6 +499,58 @@ private:
     bool libraryMode = false;
 };
 
+class DownloadOverviewDataSource : public RecyclingGridDataSource {
+public:
+    DownloadOverviewDataSource(std::vector<DownloadGridEntry> entries, bool libraryMode)
+        : entries(std::move(entries)), libraryMode(libraryMode) {}
+
+    size_t getItemCount() override { return entries.size(); }
+
+    RecyclingGridItem* cellForRow(RecyclingGrid* recycler, size_t index) override {
+        auto* cell = static_cast<DownloadCard*>(recycler->dequeueReusableCell("Cell"));
+        cell->setTask(entries[index].display);
+        return cell;
+    }
+
+    void onItemSelected(RecyclingGrid*, size_t index) override {
+        if (index >= entries.size()) return;
+        const auto& entry = entries[index];
+        if (entry.isCollection) {
+            brls::Application::pushActivity(
+                new DownloadCollectionActivity(entry.groupKey, entry.display.title, libraryMode));
+            return;
+        }
+        showTaskActions(entry.display, libraryMode);
+    }
+
+    void clearData() override { entries.clear(); }
+
+    bool updateTask(const DownloadTask& task, size_t& index) {
+        for (size_t i = 0; i < entries.size(); ++i) {
+            auto& entry = entries[i];
+            if (!entry.isCollection) {
+                if (entry.display.id != task.id) continue;
+                entry.display = task;
+                index = i;
+                return true;
+            }
+
+            for (auto& child : entry.children) {
+                if (child.id != task.id) continue;
+                child = task;
+                entry.display = makeCollectionDisplayTask(entry.children);
+                index = i;
+                return true;
+            }
+        }
+        return false;
+    }
+
+private:
+    std::vector<DownloadGridEntry> entries;
+    bool libraryMode = false;
+};
+
 void DownloadActivity::onContentAvailable() {
     grid->registerCell("Cell", []() { return DownloadCard::create(); });
     grid->estimatedRowHeight = 250;
@@ -330,7 +563,7 @@ void DownloadActivity::onContentAvailable() {
         // visible card; status/queue changes still use reload() because they can reorder rows.
         DownloadTask task;
         if (DownloadManager::instance().getTaskSnapshot(id, task)) {
-            auto* dataSource = dynamic_cast<DownloadDataSource*>(grid->getDataSource());
+            auto* dataSource = dynamic_cast<DownloadOverviewDataSource*>(grid->getDataSource());
             size_t index = 0;
             if (dataSource && dataSource->updateTask(task, index)) {
                 auto* card = dynamic_cast<DownloadCard*>(grid->getGridItemByIndex(index));
@@ -364,11 +597,65 @@ void DownloadActivity::reload() {
         if (ac && bc) return a.finished_at > b.finished_at;
         return false;
     });
-    grid->setDataSource(new DownloadDataSource(std::move(tasks), false));
+    grid->setDataSource(new DownloadOverviewDataSource(makeDownloadGridEntries(tasks), false));
     if (grid->getItemCount() == 0) grid->setEmpty("wiliwili/download_manager/empty"_i18n);
 }
 
 DownloadActivity::~DownloadActivity() {
+    DownloadManager::instance().getTaskProgressEvent()->unsubscribe(progressSub);
+    DownloadManager::instance().getTaskStatusChangedEvent()->unsubscribe(statusSub);
+}
+
+
+void DownloadCollectionActivity::onContentAvailable() {
+    titleLabel->setText(groupTitle);
+    grid->registerCell("Cell", []() { return DownloadCard::create(); });
+    grid->estimatedRowHeight = 250;
+    reload();
+
+    progressSub = DownloadManager::instance().getTaskProgressEvent()->subscribe([this](const std::string& id) {
+        DownloadTask task;
+        if (!DownloadManager::instance().getTaskSnapshot(id, task)) return;
+        if (downloadTaskGroupKey(task) != groupKey) return;
+        if (completedOnly && task.status != DownloadTaskStatus::COMPLETED) return;
+
+        auto* dataSource = dynamic_cast<DownloadTaskDataSource*>(grid->getDataSource());
+        size_t index = 0;
+        if (dataSource && dataSource->updateTask(task, index)) {
+            auto* card = dynamic_cast<DownloadCard*>(grid->getGridItemByIndex(index));
+            if (card) card->setTask(task);
+        }
+    });
+
+    statusSub = DownloadManager::instance().getTaskStatusChangedEvent()->subscribe(
+        [this](const std::string&) { reload(); });
+}
+
+void DownloadCollectionActivity::reload() {
+    auto all = DownloadManager::instance().getTasksSnapshot();
+    std::vector<DownloadTask> children;
+    for (const auto& task : all) {
+        if (downloadTaskGroupKey(task) != groupKey) continue;
+        if (completedOnly && task.status != DownloadTaskStatus::COMPLETED) continue;
+        DownloadManager::instance().ensureTaskCover(task);
+        children.push_back(task);
+    }
+
+    std::stable_sort(children.begin(), children.end(), [](const DownloadTask& a, const DownloadTask& b) {
+        if (a.part_index > 0 && b.part_index > 0 && a.part_index != b.part_index)
+            return a.part_index < b.part_index;
+        if (a.created_at != b.created_at) return a.created_at < b.created_at;
+        return a.title < b.title;
+    });
+
+    grid->setDataSource(new DownloadTaskDataSource(std::move(children), completedOnly));
+    if (grid->getItemCount() == 0)
+        grid->setEmpty(completedOnly
+            ? "wiliwili/download_manager/library_empty"_i18n
+            : "wiliwili/download_manager/empty"_i18n);
+}
+
+DownloadCollectionActivity::~DownloadCollectionActivity() {
     DownloadManager::instance().getTaskProgressEvent()->unsubscribe(progressSub);
     DownloadManager::instance().getTaskStatusChangedEvent()->unsubscribe(statusSub);
 }
@@ -386,7 +673,7 @@ void OfflineLibraryActivity::reload() {
     std::vector<DownloadTask> completed;
     for (auto& task : all) if (task.status == DownloadTaskStatus::COMPLETED) completed.emplace_back(std::move(task));
     std::stable_sort(completed.begin(), completed.end(), [](const auto& a, const auto& b) { return a.finished_at > b.finished_at; });
-    grid->setDataSource(new DownloadDataSource(std::move(completed), true));
+    grid->setDataSource(new DownloadOverviewDataSource(makeDownloadGridEntries(completed), true));
     if (grid->getItemCount() == 0) grid->setEmpty("wiliwili/download_manager/library_empty"_i18n);
 }
 

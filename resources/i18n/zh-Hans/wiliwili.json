@@ -547,12 +547,12 @@
         },
         "pause": "暂停",
         "resume": "继续",
-        "cancel": "取消任务",
+        "cancel": "取消下载",
         "retry": "重试",
         "show_path": "显示保存路径",
         "open_folder": "打开保存目录",
-        "delete": "删除",
-        "delete_confirm": "确认删除任务和已下载文件？",
+        "delete": "删除下载文件",
+        "delete_confirm": "确认删除下载任务和本地视频文件？",
         "empty": "暂无下载任务",
         "play": "离线播放",
         "play_missing": "本地媒体文件不存在",
@@ -574,6 +574,7 @@
             "done": "可离线播放"
         },
         "source_info": "查看源信息",
-        "open_source": "打开原始页面"
+        "open_source": "打开原始页面",
+        "collection_meta": "{} 个视频 · 已完成 {}/{}"
     }
 }
