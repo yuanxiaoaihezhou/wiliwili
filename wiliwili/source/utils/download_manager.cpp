@@ -467,7 +467,7 @@ void DownloadManager::saveState() {
             snapshot = tasks;
         }
         for (auto& task : snapshot) {
-            task.schema_version = 3;
+            task.schema_version = 4;
             task.video_urls.clear();
             task.audio_urls.clear();
             task.flv_segments.clear();
@@ -548,7 +548,7 @@ void DownloadManager::scanOfflineLibrary() {
                 if (!sourceOwned && !markerOwned) continue;
 
                 DownloadTask task;
-                task.schema_version = 3;
+                task.schema_version = 4;
                 task.id = info.value("id", "");
                 task.title = info.value("title", "");
                 task.series_title = info.value("series_title", task.title);
@@ -556,6 +556,7 @@ void DownloadManager::scanOfflineLibrary() {
                 task.part_index = info.value("part_index", 0);
                 task.owner_name = info.value("owner_name", "");
                 task.cover_url = info.value("cover_url", "");
+                task.series_cover_url = info.value("series_cover_url", task.cover_url);
                 task.bvid = info.value("bvid", "");
                 task.aid = info.value("aid", uint64_t{0});
                 task.cid = info.value("cid", uint64_t{0});
@@ -635,7 +636,7 @@ void DownloadManager::addTask(DownloadTask task) {
     if (task.id.empty()) task.id = makeTaskId(task);
     if (task.created_at == 0) task.created_at = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    task.schema_version = 3;
+    task.schema_version = 4;
     if (task.series_title.empty()) task.series_title = task.title.empty() ? (task.bvid.empty() ? "Bilibili" : task.bvid) : task.title;
     if (task.part_title.empty()) task.part_title = task.title;
     if (task.estimated_bytes <= 0) task.estimated_bytes = estimateBytes(task);
@@ -678,7 +679,7 @@ void DownloadManager::addTasks(std::vector<DownloadTask> batch) {
         if (task.id.empty()) task.id = makeTaskId(task);
         if (task.created_at == 0) task.created_at = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::system_clock::now().time_since_epoch()).count();
-        task.schema_version = 3;
+        task.schema_version = 4;
         if (task.series_title.empty()) task.series_title = task.title.empty() ? (task.bvid.empty() ? "Bilibili" : task.bvid) : task.title;
         if (task.part_title.empty()) task.part_title = task.title;
         if (task.estimated_bytes <= 0) task.estimated_bytes = estimateBytes(task);
@@ -858,11 +859,14 @@ void DownloadManager::deleteTask(const std::string& id) {
         }
     }
 
+    std::string parentDir;
+    try { parentDir = cpr::fs::path(task.dir).parent_path().string(); } catch (...) {}
     {
         std::lock_guard<std::mutex> lock(tasksMutex);
         auto it = std::find_if(tasks.begin(), tasks.end(), [&](const DownloadTask& t) { return t.id == id; });
         if (it != tasks.end()) tasks.erase(it);
     }
+    if (!parentDir.empty()) saveCollectionMetadataForParent(parentDir);
     saveState();
     taskStatusChangedEvent.fire(id);
     startNextTask();
@@ -921,400 +925,269 @@ bool DownloadManager::hasCompletedTask(const std::string& bvid, uint64_t cid) co
 
 
 void DownloadManager::ensureTaskCover(const DownloadTask& snapshot) {
-    if (!snapshot.cover_url.empty() || snapshot.id.empty()) return;
-    if (snapshot.bvid.empty() && snapshot.aid == 0) return;
+    if (snapshot.id.empty() || snapshot.dir.empty()) return;
+
+    const auto coverPath = joinPath(snapshot.dir, "cover.jpg");
+    bool childCoverExists = false;
+    try { childCoverExists = cpr::fs::exists(coverPath) && cpr::fs::file_size(coverPath) > 0; } catch (...) {}
+
+    // Even when the child cover is already present, keep collection.json/parent cover in sync.
+    if (childCoverExists && !snapshot.cover_url.empty()) {
+        saveCollectionMetadata(snapshot);
+        return;
+    }
 
     {
         std::lock_guard<std::mutex> lock(coverRequestMutex);
         if (!coverRequests.insert(snapshot.id).second) return;
     }
 
-    const auto id = snapshot.id;
-    auto finish = [this, id](const std::string& cover) {
-        DownloadTask updated;
-        bool changed = false;
-        if (!cover.empty() && !shuttingDown.load()) {
+    auto finish = [this, snapshot](const std::string& resolvedCover) mutable {
+        DownloadTask updated = snapshot;
+        if (!resolvedCover.empty()) updated.cover_url = resolvedCover;
+        if (updated.series_cover_url.empty()) updated.series_cover_url = updated.cover_url;
+
+        {
             std::lock_guard<std::mutex> lock(tasksMutex);
             auto it = std::find_if(tasks.begin(), tasks.end(),
-                                   [&](const DownloadTask& task) { return task.id == id; });
-            if (it != tasks.end() && it->cover_url.empty()) {
-                it->cover_url = cover;
+                                   [&](const DownloadTask& task) { return task.id == snapshot.id; });
+            if (it != tasks.end()) {
+                if (!updated.cover_url.empty()) it->cover_url = updated.cover_url;
+                if (!updated.series_cover_url.empty()) it->series_cover_url = updated.series_cover_url;
                 updated = *it;
-                changed = true;
             }
         }
-        {
-            std::lock_guard<std::mutex> lock(coverRequestMutex);
-            coverRequests.erase(id);
+
+        if (runtimeDownloadCover.load() && !updated.cover_url.empty()) {
+            downloadCoverAsset(updated, updated.cover_url, joinPath(updated.dir, "cover.jpg"));
+
+            // Persist a logical collection cover as well. For new UGC batches this uses the real
+            // ugc_season.cover; legacy tasks fall back to a child cover.
+            try {
+                const auto parent = cpr::fs::path(updated.dir).parent_path().string();
+                if (!parent.empty()) {
+                    const auto seriesCover = updated.series_cover_url.empty() ? updated.cover_url : updated.series_cover_url;
+                    if (!seriesCover.empty())
+                        downloadCoverAsset(updated, seriesCover, joinPath(parent, "cover.jpg"));
+                }
+            } catch (...) {}
         }
-        if (!changed) return;
 
         saveMetadata(updated, updated.status == DownloadTaskStatus::COMPLETED);
+        saveCollectionMetadata(updated);
         saveState();
-        brls::sync([this, id]() { taskStatusChangedEvent.fire(id); });
+
+        {
+            std::lock_guard<std::mutex> lock(coverRequestMutex);
+            coverRequests.erase(snapshot.id);
+        }
+        if (!shuttingDown.load()) {
+            brls::sync([this, id = snapshot.id]() { taskStatusChangedEvent.fire(id); });
+        }
     };
 
-    auto failure = [finish](const std::string&, int) { finish(std::string{}); };
+    auto failure = [finish, snapshot](BILI_ERR) mutable {
+        // If metadata already carried a URL, still use it even if a fresh detail request failed.
+        finish(snapshot.cover_url);
+    };
+
+    // BILI detail callbacks run off the Borealis UI thread, so the actual cover HTTP/file write
+    // below does not block navigation when old completed collections are being repaired.
     if (!snapshot.bvid.empty()) {
         BILI::get_video_detail(
             snapshot.bvid,
-            [finish](const bilibili::VideoDetailResult& result) { finish(result.pic); },
+            [finish](const bilibili::VideoDetailResult& result) mutable { finish(result.pic); },
             failure);
-    } else {
+    } else if (snapshot.aid != 0) {
         BILI::get_video_detail(
             snapshot.aid,
-            [finish](const bilibili::VideoDetailResult& result) { finish(result.pic); },
+            [finish](const bilibili::VideoDetailResult& result) mutable { finish(result.pic); },
             failure);
+    } else {
+        finish(snapshot.cover_url);
     }
 }
 
-int DownloadManager::maxConcurrent() const { return concurrentLimit.load(); }
+bool DownloadManager::resolveTaskCover(DownloadTask& task) {
+    if (!task.cover_url.empty()) {
+        if (task.series_cover_url.empty()) task.series_cover_url = task.cover_url;
+        return true;
+    }
+    if (task.bvid.empty() && task.aid == 0) return false;
 
-int64_t DownloadManager::effectiveSpeedLimit() const {
-    const int64_t normal = normalSpeedLimit.load();
-    if (!playbackActive.load()) return normal;
-    const int64_t duringPlayback = playbackSpeedLimit.load();
-    if (duringPlayback <= 0) return normal;
-    if (normal <= 0) return duringPlayback;
-    return std::min(normal, duringPlayback);
-}
+    struct CoverState {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool done = false;
+        bool ok = false;
+        std::string cover;
+    };
+    auto state = std::make_shared<CoverState>();
 
-void DownloadManager::ensureWorkers() {
-    if (!workerThreads.empty()) return;
-    workerThreads.reserve(4);
-    for (int i = 0; i < 4; ++i) workerThreads.emplace_back([this]() { workerLoop(); });
-}
-
-void DownloadManager::startNextTask() {
-    if (shuttingDown.load()) return;
-    workerCv.notify_all();
-}
-
-void DownloadManager::workerLoop() {
-    while (!shuttingDown.load()) {
-        std::string id;
+    auto success = [state](const bilibili::VideoDetailResult& result) {
         {
-            std::lock_guard<std::mutex> lock(tasksMutex);
-            if (static_cast<int>(runningTasks.size()) < maxConcurrent()) {
-                auto it = std::find_if(tasks.begin(), tasks.end(), [&](const DownloadTask& task) {
-                    return task.status == DownloadTaskStatus::PENDING && runningTasks.count(task.id) == 0;
-                });
-                if (it != tasks.end()) {
-                    it->status = DownloadTaskStatus::DOWNLOADING;
-                    it->stage = DownloadTaskStage::REFRESHING_SOURCE;
-                    it->error_message.clear();
-                    runningTasks.insert(it->id);
-                    id = it->id;
-                }
-            }
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->cover = result.pic;
+            state->ok = !result.pic.empty();
+            state->done = true;
+        }
+        state->cv.notify_one();
+    };
+    auto failure = [state](BILI_ERR) {
+        {
+            std::lock_guard<std::mutex> lock(state->mutex);
+            state->done = true;
+        }
+        state->cv.notify_one();
+    };
+
+    if (!task.bvid.empty()) BILI::get_video_detail(task.bvid, success, failure);
+    else BILI::get_video_detail(task.aid, success, failure);
+
+    std::unique_lock<std::mutex> lock(state->mutex);
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(12);
+    while (!state->done && !cancelledOrPaused(task) && !shuttingDown.load()) {
+        if (state->cv.wait_until(lock, deadline) == std::cv_status::timeout) break;
+    }
+    if (!state->done || !state->ok || cancelledOrPaused(task) || shuttingDown.load()) return false;
+
+    task.cover_url = state->cover;
+    if (task.series_cover_url.empty()) task.series_cover_url = task.cover_url;
+    return true;
+}
+
+bool DownloadManager::downloadCoverAsset(const DownloadTask& task, const std::string& url, const std::string& path) {
+    if (url.empty() || path.empty() || cancelledOrPaused(task) || shuttingDown.load()) return false;
+    std::lock_guard<std::mutex> coverLock(coverFileMutex);
+    try {
+        if (cpr::fs::exists(path) && cpr::fs::file_size(path) > 0) return true;
+    } catch (...) {}
+
+    const auto tempPath = path + ".part";
+    try {
+        if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath);
+        cpr::fs::create_directories(cpr::fs::path(path).parent_path());
+
+        auto session = bilibili::HTTP::createSession();
+        session->SetUrl(cpr::Url{url});
+        session->SetTimeout(cpr::Timeout{12000});
+        session->SetProgressCallback(cpr::ProgressCallback(
+            [&task, this](cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t,
+                          cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t, intptr_t) {
+                return !cancelledOrPaused(task) && !shuttingDown.load();
+            }));
+        const auto response = session->Get();
+        if (response.error || response.status_code != 200 || response.text.empty() ||
+            cancelledOrPaused(task) || shuttingDown.load()) {
+            try { if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath); } catch (...) {}
+            return false;
         }
 
-        if (id.empty()) {
-            std::unique_lock<std::mutex> waitLock(workerMutex);
-            workerCv.wait_for(waitLock, std::chrono::milliseconds(250));
-            continue;
+        {
+            std::ofstream out(tempPath, std::ios::binary | std::ios::trunc);
+            if (!out.is_open()) return false;
+            out.write(response.text.data(), static_cast<std::streamsize>(response.text.size()));
+            if (!out.good()) return false;
         }
-
-        saveState();
-        try {
-            runTask(id);
-        } catch (const std::exception& e) {
-            handleWorkerFailure(id, std::string("Download worker error: ") + e.what());
-        } catch (...) {
-            handleWorkerFailure(id, "Unexpected download worker error");
+        if (!moveReplace(tempPath, path)) {
+            try { if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath); } catch (...) {}
+            return false;
         }
+        return true;
+    } catch (const std::exception& e) {
+        brls::Logger::warning("DownloadManager: cover asset failed for {}: {}", task.id, e.what());
+        try { if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath); } catch (...) {}
+        return false;
     }
 }
 
-void DownloadManager::handleWorkerFailure(const std::string& id, const std::string& error) {
-    bool owned = false;
+void DownloadManager::saveCollectionMetadata(const DownloadTask& task) {
+    if (task.dir.empty()) return;
+    try {
+        saveCollectionMetadataForParent(cpr::fs::path(task.dir).parent_path().string());
+    } catch (...) {}
+}
+
+void DownloadManager::saveCollectionMetadataForParent(const std::string& parentDir) {
+    if (parentDir.empty()) return;
+
+    std::vector<DownloadTask> children;
     {
         std::lock_guard<std::mutex> lock(tasksMutex);
-        owned = runningTasks.erase(id) > 0;
-        if (owned) {
-            for (auto& task : tasks) {
-                if (task.id != id) continue;
-                if (task.cancelFlag && task.cancelFlag->load()) task.status = DownloadTaskStatus::CANCELLED;
-                else if (task.pauseFlag && task.pauseFlag->load()) task.status = DownloadTaskStatus::PAUSED;
-                else {
-                    task.status = DownloadTaskStatus::FAILED;
-                    task.error_message = error;
-                }
-                break;
-            }
+        for (const auto& task : tasks) {
+            if (task.dir.empty()) continue;
+            try {
+                if (cpr::fs::path(task.dir).parent_path().string() == parentDir) children.push_back(task);
+            } catch (...) {}
         }
     }
-    releaseDiskSpace(id);
-    if (!owned) return;
-    brls::Logger::error("DownloadManager: {}", error);
-    saveState();
-    if (!shuttingDown.load()) brls::sync([this, id]() { taskStatusChangedEvent.fire(id); });
-    startNextTask();
-}
 
-bool DownloadManager::throttleBytes(size_t bytes, std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag) {
-    if (bytes == 0) return true;
-    std::unique_lock<std::mutex> lock(throttleMutex);
-    while (!shuttingDown.load() && !cancelFlag.load() && !pauseFlag.load()) {
-        const int64_t limit = effectiveSpeedLimit();
-        const auto now = std::chrono::steady_clock::now();
-        if (limit <= 0) {
-            throttleTokens = 0.0;
-            throttleLastRefill = now;
-            return true;
-        }
+    const auto collectionPath = joinPath(parentDir, "collection.json");
+    if (children.size() <= 1) {
+        try { if (cpr::fs::exists(collectionPath)) cpr::fs::remove(collectionPath); } catch (...) {}
+        return;
+    }
 
-        const double elapsed = std::max(0.0, std::chrono::duration<double>(now - throttleLastRefill).count());
-        // A quarter-second bucket keeps the configured TOTAL rate smooth while still tolerating
-        // ordinary cpr callback chunk sizes. For very low limits, one chunk may be the capacity,
-        // but tokens start/refill at the configured byte rate so it still waits the correct time.
-        const double capacity = std::max<double>(static_cast<double>(bytes), static_cast<double>(limit) * 0.25);
-        throttleTokens = std::min(capacity, throttleTokens + elapsed * static_cast<double>(limit));
-        throttleLastRefill = now;
-        if (throttleTokens >= static_cast<double>(bytes)) {
-            throttleTokens -= static_cast<double>(bytes);
-            return true;
-        }
+    std::stable_sort(children.begin(), children.end(), [](const DownloadTask& a, const DownloadTask& b) {
+        if (a.part_index > 0 && b.part_index > 0 && a.part_index != b.part_index) return a.part_index < b.part_index;
+        return a.created_at < b.created_at;
+    });
 
-        const double secondsNeeded = (static_cast<double>(bytes) - throttleTokens) / static_cast<double>(limit);
-        const auto waitFor = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::duration<double>(std::max(0.001, std::min(0.25, secondsNeeded))));
-        throttleCv.wait_for(lock, waitFor, [&]() {
-            return shuttingDown.load() || cancelFlag.load() || pauseFlag.load();
+    size_t completed = 0;
+    std::string seriesTitle;
+    std::string seriesCoverUrl;
+    nlohmann::json items = nlohmann::json::array();
+
+    for (const auto& child : children) {
+        if (seriesTitle.empty() && !child.series_title.empty()) seriesTitle = child.series_title;
+        if (seriesCoverUrl.empty() && !child.series_cover_url.empty()) seriesCoverUrl = child.series_cover_url;
+        if (seriesCoverUrl.empty() && !child.cover_url.empty()) seriesCoverUrl = child.cover_url;
+        if (child.status == DownloadTaskStatus::COMPLETED) ++completed;
+
+        const auto childCover = joinPath(child.dir, "cover.jpg");
+        const auto childDanmaku = joinPath(child.dir, "danmaku.xml");
+        std::vector<std::string> subtitles;
+        try {
+            for (const auto& entry : cpr::fs::directory_iterator(child.dir)) {
+                if (!cpr::fs::is_regular_file(entry.path())) continue;
+                const auto ext = entry.path().extension().string();
+                if (ext == ".ass" || ext == ".srt") subtitles.push_back(entry.path().filename().string());
+            }
+            std::sort(subtitles.begin(), subtitles.end());
+        } catch (...) {}
+
+        items.push_back({
+            {"id", child.id}, {"title", child.title}, {"part_title", child.part_title},
+            {"part_index", child.part_index}, {"bvid", child.bvid}, {"aid", child.aid}, {"cid", child.cid},
+            {"status", static_cast<int>(child.status)}, {"dir", cpr::fs::path(child.dir).filename().string()},
+            {"cover_url", child.cover_url},
+            {"cover_file", cpr::fs::exists(childCover) ? "cover.jpg" : ""},
+            {"danmaku_file", cpr::fs::exists(childDanmaku) ? "danmaku.xml" : ""},
+            {"subtitle_files", subtitles},
+            {"source_file", cpr::fs::exists(joinPath(child.dir, "source.json")) ? "source.json" : ""},
+            {"info_file", cpr::fs::exists(joinPath(child.dir, "info.json")) ? "info.json" : ""}
         });
     }
-    return false;
-}
 
-bool DownloadManager::reserveDiskSpace(const std::string& taskId, const std::string& path,
-                                       int64_t requiredBytes, int64_t& freeBytes) {
-    std::lock_guard<std::mutex> lock(reservationMutex);
-    freeBytes = availableBytes(path);
-    if (requiredBytes <= 0 || freeBytes < 0) {
-        diskReservations[taskId] = std::max<int64_t>(0, requiredBytes);
-        return true;
-    }
-    int64_t reservedByOthers = 0;
-    for (const auto& item : diskReservations) if (item.first != taskId) reservedByOthers += item.second;
-    if (freeBytes - reservedByOthers < requiredBytes) return false;
-    diskReservations[taskId] = requiredBytes;
-    return true;
-}
-
-void DownloadManager::releaseDiskSpace(const std::string& taskId) {
-    std::lock_guard<std::mutex> lock(reservationMutex);
-    diskReservations.erase(taskId);
-}
-
-void DownloadManager::updateLiveProgress(const std::string& taskId, int64_t downloaded, int64_t total, bool audioPart) {
-    {
-        std::lock_guard<std::mutex> lock(tasksMutex);
-        for (auto& t : tasks) if (t.id == taskId) {
-            if (audioPart) { t.audio_downloaded_bytes = downloaded; t.audio_total_bytes = total; }
-            else { t.downloaded_bytes = downloaded; t.total_bytes = total; }
-            break;
+    const auto parentCover = joinPath(parentDir, "cover.jpg");
+    // Legacy collections may not know a series cover URL. Copy a real child cover so the collection
+    // still has a durable offline thumbnail instead of relying on a remote URL forever.
+    if (!cpr::fs::exists(parentCover)) {
+        for (const auto& child : children) {
+            const auto childCover = joinPath(child.dir, "cover.jpg");
+            if (cpr::fs::exists(childCover) && copyReplace(childCover, parentCover)) break;
         }
     }
-    if (!shuttingDown.load()) brls::sync([this, taskId]() { taskProgressEvent.fire(taskId); });
-}
 
-
-void DownloadManager::updateStage(const std::string& taskId, DownloadTaskStage stage, const std::string& error) {
-    {
-        std::lock_guard<std::mutex> lock(tasksMutex);
-        for (auto& t : tasks) if (t.id == taskId) {
-            t.stage = stage;
-            if (!error.empty()) t.error_message = error;
-            break;
-        }
-    }
-    if (!shuttingDown.load()) brls::sync([this, taskId]() { taskStatusChangedEvent.fire(taskId); });
-}
-
-bool DownloadManager::downloadFile(const std::string& url, const std::string& filepath,
-                                   std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag,
-                                   int64_t& downloadedBytes, int64_t& totalBytes,
-                                   const std::string& taskId, bool audioPart) {
-    int64_t existing = 0;
-    try { if (cpr::fs::exists(filepath)) existing = static_cast<int64_t>(cpr::fs::file_size(filepath)); } catch (...) {}
-    if (existing > 0 && totalBytes > 0 && existing >= totalBytes) {
-        // A complete-sized file no longer needs its transport validator. Integrity is checked by
-        // ffprobe before completion; if that fails verifyTaskMedia() quarantines it for redownload.
-        try {
-            const auto staleResumeMeta = filepath + ".resume.json";
-            if (cpr::fs::exists(staleResumeMeta)) cpr::fs::remove(staleResumeMeta);
-        } catch (...) {}
-        downloadedBytes = existing;
-        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-        return true;
-    }
-
-    const auto tempPath = filepath + ".request.part";
-    const auto resumeMetaPath = filepath + ".resume.json";
-    std::string resumeValidator;
-    if (existing > 0 && cpr::fs::exists(resumeMetaPath)) {
-        try {
-            std::ifstream rf(resumeMetaPath);
-            nlohmann::json resume; rf >> resume;
-            resumeValidator = resume.value("validator", "");
-        } catch (...) {}
-    }
-    std::ofstream ofs(tempPath, std::ios::binary | std::ios::trunc);
-    if (!ofs.is_open()) return false;
-
-    int64_t requestBytes = 0;
-    downloadedBytes = existing;
-    updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-    auto lastFire = std::chrono::steady_clock::now();
-
-    auto session = bilibili::HTTP::createSession();
-    session->SetUrl(cpr::Url{url});
-    auto headers = bilibili::HTTP::HEADERS;
-    if (existing > 0) {
-        headers["Range"] = fmt::format("bytes={}-", existing);
-        if (!resumeValidator.empty()) headers["If-Range"] = resumeValidator;
-    }
-    session->SetHeader(headers);
-    session->SetTimeout(cpr::Timeout{0});
-    session->SetWriteCallback(cpr::WriteCallback([&](std::string data, intptr_t) -> bool {
-        if (cancelFlag.load() || pauseFlag.load() || shuttingDown.load()) return false;
-        // One shared token bucket enforces the configured TOTAL background-download speed across
-        // all concurrent workers. Sleeping inside the write callback naturally back-pressures cpr.
-        if (!throttleBytes(data.size(), cancelFlag, pauseFlag)) return false;
-        ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
-        if (!ofs.good()) return false;
-        requestBytes += static_cast<int64_t>(data.size());
-        downloadedBytes = existing + requestBytes;
-        auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration<double>(now - lastFire).count() >= 0.25) {
-            lastFire = now;
-            updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-        }
-        return true;
-    }));
-    session->SetProgressCallback(cpr::ProgressCallback([&](cpr::cpr_pf_arg_t dltotal, cpr::cpr_pf_arg_t,
-                                                     cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t, intptr_t) -> bool {
-        if (dltotal > 0) totalBytes = existing + static_cast<int64_t>(dltotal);
-        return !cancelFlag.load() && !pauseFlag.load() && !shuttingDown.load();
-    }));
-    auto response = session->Get();
-    ofs.close();
-
-    std::string responseValidator = responseHeader(response, "etag");
-    if (responseValidator.empty()) responseValidator = responseHeader(response, "last-modified");
-    auto saveResumeValidator = [&](const std::string& validator) {
-        try {
-            if (validator.empty()) {
-                if (cpr::fs::exists(resumeMetaPath)) cpr::fs::remove(resumeMetaPath);
-                return;
-            }
-            std::ofstream meta(resumeMetaPath, std::ios::trunc);
-            if (meta.is_open()) meta << nlohmann::json{{"validator", validator}}.dump();
-        } catch (...) {}
+    nlohmann::json collection = {
+        {"schema_version", 1}, {"app", "wiliwili"}, {"title", seriesTitle},
+        {"cover_url", seriesCoverUrl},
+        {"cover_file", cpr::fs::exists(parentCover) ? "cover.jpg" : ""},
+        {"item_count", children.size()}, {"completed_count", completed},
+        {"items", items}
     };
-    auto clearResumeValidator = [&]() {
-        try { if (cpr::fs::exists(resumeMetaPath)) cpr::fs::remove(resumeMetaPath); } catch (...) {}
-    };
-
-    const bool rangeResponse = response.status_code == 206;
-    const bool rangeValid = rangeResponse && responseRangeStartsAt(response, existing);
-    auto appendTemp = [&]() -> bool {
-        if (!rangeValid) return false;
-        std::ifstream in(tempPath, std::ios::binary);
-        std::ofstream out(filepath, std::ios::binary | std::ios::app);
-        if (!in.is_open() || !out.is_open()) return false;
-        out << in.rdbuf();
-        in.close(); out.close();
-        if (!out.good()) return false;
-        cpr::fs::remove(tempPath);
-        downloadedBytes = existing + requestBytes;
-        saveResumeValidator(!responseValidator.empty() ? responseValidator : resumeValidator);
-        return true;
-    };
-
-    if (cancelFlag.load() || pauseFlag.load() || shuttingDown.load()) {
-        try {
-            if (requestBytes > 0) {
-                if (rangeValid) {
-                    appendTemp();
-                } else if (existing == 0) {
-                    if (!moveReplace(tempPath, filepath)) throw std::runtime_error("cannot preserve partial file");
-                    downloadedBytes = requestBytes;
-                    saveResumeValidator(responseValidator);
-                } else {
-                    // Never append an unvalidated 206 or an ignored-Range HTTP 200 to an existing
-                    // partial. Keep the old verified prefix and discard only this unsafe chunk.
-                    cpr::fs::remove(tempPath);
-                    downloadedBytes = existing;
-                }
-            } else if (cpr::fs::exists(tempPath)) {
-                cpr::fs::remove(tempPath);
-            }
-        } catch (const std::exception& e) {
-            brls::Logger::error("DownloadManager: preserving partial file failed: {}", e.what());
-        }
-        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-        return false;
-    }
-
-    if (response.error || (response.status_code != 200 && response.status_code != 206)) {
-        try {
-            const bool mediaStatus = response.status_code == 200 || response.status_code == 206;
-            if (requestBytes > 0 && mediaStatus) {
-                if (rangeValid) {
-                    appendTemp();
-                } else if (response.status_code == 200 && existing == 0) {
-                    // A transport error can still leave a useful prefix of a normal HTTP 200 body.
-                    // Never persist HTTP error pages or an unvalidated 206 response as media.
-                    if (moveReplace(tempPath, filepath)) {
-                        downloadedBytes = requestBytes;
-                        saveResumeValidator(responseValidator);
-                    }
-                } else if (cpr::fs::exists(tempPath)) {
-                    cpr::fs::remove(tempPath);
-                }
-            } else if (cpr::fs::exists(tempPath)) {
-                cpr::fs::remove(tempPath);
-            }
-        } catch (...) {}
-        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-        brls::Logger::error("DownloadManager: media request to {} failed, HTTP {}, {}",
-                            urlHost(url), response.status_code, response.error.message);
-        return false;
-    }
-
-    // RFC-compliant 206 responses must describe the exact returned range. A CDN/source switch can
-    // otherwise make a syntactically successful resume silently corrupt the media file.
-    if (rangeResponse && !rangeValid) {
-        brls::Logger::warning("DownloadManager: invalid Content-Range from {}; restarting track from byte 0", urlHost(url));
-        try {
-            if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath);
-            if (cpr::fs::exists(filepath)) cpr::fs::remove(filepath);
-            clearResumeValidator();
-        } catch (...) {}
-        downloadedBytes = 0;
-        totalBytes = 0;
-        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-        return false;
-    }
-
-    try {
-        if (rangeValid) {
-            if (!appendTemp()) throw std::runtime_error("cannot append validated Range response");
-        } else {
-            // HTTP 200 after a Range request means the server ignored Range and sent a full body.
-            // Atomically replace the old partial rather than duplicating bytes.
-            if (!moveReplace(tempPath, filepath)) throw std::runtime_error("cannot finalize downloaded file");
-            downloadedBytes = requestBytes;
-            totalBytes = requestBytes;
-        }
-        clearResumeValidator();
-    } catch (const std::exception& e) {
-        brls::Logger::error("DownloadManager: finalizing file failed: {}", e.what());
-        return false;
-    }
-    updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
-    return true;
+    if (!writeJsonAtomic(collectionPath, collection))
+        brls::Logger::warning("DownloadManager: could not write collection.json for {}", parentDir);
 }
 
 bool DownloadManager::refreshSource(DownloadTask& task) {
@@ -1916,10 +1789,11 @@ void DownloadManager::saveMetadata(const DownloadTask& task, bool completed) {
         cpr::fs::create_directories(task.dir);
         auto& appVersion = APPVersion::instance();
         nlohmann::json source = {
-            {"schema_version", 3}, {"app", "wiliwili"}, {"app_version", appVersion.getVersionStr()},
+            {"schema_version", 4}, {"app", "wiliwili"}, {"app_version", appVersion.getVersionStr()},
             {"app_git_commit", appVersion.git_commit}, {"source_page_url", task.source_page_url}, {"title", task.title},
             {"series_title", task.series_title}, {"part_title", task.part_title}, {"part_index", task.part_index},
-            {"owner_name", task.owner_name}, {"cover_url", task.cover_url}, {"bvid", task.bvid}, {"aid", task.aid},
+            {"owner_name", task.owner_name}, {"cover_url", task.cover_url}, {"series_cover_url", task.series_cover_url},
+            {"bvid", task.bvid}, {"aid", task.aid},
             {"cid", task.cid}, {"is_pgc", task.is_pgc}, {"format", task.is_dash ? "dash" : "flv"},
             {"duration_seconds", task.duration_seconds}, {"download_root", task.download_root},
             {"created_at", task.created_at}, {"finished_at", task.finished_at},
@@ -1963,10 +1837,15 @@ void DownloadManager::saveMetadata(const DownloadTask& task, bool completed) {
             std::sort(subtitleFiles.begin(), subtitleFiles.end());
         } catch (...) {}
 
+        const auto coverPath = joinPath(task.dir, "cover.jpg");
+        const auto danmakuPath = joinPath(task.dir, "danmaku.xml");
+        const std::string coverFile = cpr::fs::exists(coverPath) ? "cover.jpg" : "";
+        const std::string danmakuFile = cpr::fs::exists(danmakuPath) ? "danmaku.xml" : "";
+
         nlohmann::json info = {
-            {"schema_version", 3}, {"id", task.id}, {"title", task.title}, {"series_title", task.series_title},
+            {"schema_version", 4}, {"id", task.id}, {"title", task.title}, {"series_title", task.series_title},
             {"part_title", task.part_title}, {"part_index", task.part_index}, {"owner_name", task.owner_name},
-            {"cover_url", task.cover_url}, {"bvid", task.bvid}, {"aid", task.aid}, {"cid", task.cid},
+            {"cover_url", task.cover_url}, {"series_cover_url", task.series_cover_url}, {"bvid", task.bvid}, {"aid", task.aid}, {"cid", task.cid},
             {"quality", task.quality}, {"quality_desc", task.quality_desc}, {"audio_id", task.audio_id},
             {"audio_desc", task.audio_desc}, {"is_dash", task.is_dash}, {"is_pgc", task.is_pgc},
             {"duration_seconds", task.duration_seconds}, {"estimated_bytes", estimateBytes(task)},
@@ -1976,7 +1855,7 @@ void DownloadManager::saveMetadata(const DownloadTask& task, bool completed) {
             {"download_root", task.download_root}, {"download_dir", task.dir}, {"muxed", task.muxed},
             {"created_at", task.created_at},
             {"finished_at", task.finished_at}, {"completed", completed}, {"source_file", "source.json"},
-            {"debug_source_file", runtimeDebugSource.load() ? "debug_source.json" : ""}, {"cover_file", "cover.jpg"}, {"danmaku_file", "danmaku.xml"},
+            {"debug_source_file", runtimeDebugSource.load() ? "debug_source.json" : ""}, {"cover_file", coverFile}, {"danmaku_file", danmakuFile},
             {"subtitle_files", subtitleFiles}
         };
         if (!writeJsonAtomic(joinPath(task.dir, "info.json"), info))
@@ -2159,6 +2038,47 @@ void DownloadManager::runTask(const std::string& id) {
         return true;
     };
 
+    // Batch UGC tasks can enter the queue without cover_url. Resolve it inside the worker,
+    // before the cover download step, so saving artwork never depends on the user opening Download Manager.
+    if (runtimeDownloadCover.load() && !cancelledOrPaused(work) && !shuttingDown.load()) {
+        bool coverChanged = false;
+        if (work.cover_url.empty()) coverChanged = resolveTaskCover(work);
+        if (work.series_cover_url.empty() && !work.cover_url.empty()) {
+            work.series_cover_url = work.cover_url;
+            coverChanged = true;
+        }
+
+        if (coverChanged) {
+            {
+                std::lock_guard<std::mutex> lock(tasksMutex);
+                auto it = std::find_if(tasks.begin(), tasks.end(),
+                                       [&](const DownloadTask& task) { return task.id == work.id; });
+                if (it != tasks.end()) {
+                    it->cover_url = work.cover_url;
+                    it->series_cover_url = work.series_cover_url;
+                }
+            }
+            saveState();
+            saveMetadata(work, false);
+            if (!shuttingDown.load()) {
+                brls::sync([this, id = work.id]() { taskStatusChangedEvent.fire(id); });
+            }
+        }
+
+        if (!work.cover_url.empty())
+            downloadCoverAsset(work, work.cover_url, joinPath(work.dir, "cover.jpg"));
+
+        try {
+            const auto parent = cpr::fs::path(work.dir).parent_path().string();
+            const auto seriesCover = work.series_cover_url.empty() ? work.cover_url : work.series_cover_url;
+            if (!parent.empty() && !seriesCover.empty())
+                downloadCoverAsset(work, seriesCover, joinPath(parent, "cover.jpg"));
+        } catch (...) {}
+
+        saveMetadata(work, false);
+        saveCollectionMetadata(work);
+    }
+
     // Suspend/resume and Wi-Fi roaming can invalidate an in-flight CDN connection. Retry with a
     // freshly resolved play-url while keeping only Range-validated partial prefixes.
     for (int attempt = 0; attempt < 6 && !success; ++attempt) {
@@ -2202,26 +2122,6 @@ void DownloadManager::runTask(const std::string& id) {
                 requiredFree / 1048576.0, reservedByOthers / 1048576.0, freeBytes / 1048576.0);
             fatalSpaceError = true;
             break;
-        }
-
-        if (runtimeDownloadCover.load() && !work.cover_url.empty() && !cancelledOrPaused(work)) {
-            const auto coverPath = joinPath(work.dir, "cover.jpg");
-            if (!cpr::fs::exists(coverPath)) {
-                try {
-                    auto session = bilibili::HTTP::createSession();
-                    session->SetUrl(cpr::Url{work.cover_url});
-                    session->SetTimeout(cpr::Timeout{10000});
-                    session->SetProgressCallback(cpr::ProgressCallback([&](cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t,
-                                                                       cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t, intptr_t) {
-                        return !cancelledOrPaused(work) && !shuttingDown.load();
-                    }));
-                    auto response = session->Get();
-                    if (!response.error && response.status_code == 200 && !cancelledOrPaused(work)) {
-                        std::ofstream f(coverPath, std::ios::binary);
-                        if (f.is_open()) f.write(response.text.data(), static_cast<std::streamsize>(response.text.size()));
-                    }
-                } catch (...) {}
-            }
         }
 
         success = work.is_dash ? downloadDash(work) : downloadFlv(work);
@@ -2290,6 +2190,7 @@ void DownloadManager::runTask(const std::string& id) {
             t.audio_downloaded_bytes = work.audio_downloaded_bytes; t.audio_total_bytes = work.audio_total_bytes;
             // Do not retain expiring signed CDN URLs in the long-lived task model.
             t.video_urls.clear(); t.audio_urls.clear(); t.flv_segments.clear();
+            t.cover_url = work.cover_url; t.series_cover_url = work.series_cover_url;
             t.video_codec_id = work.video_codec_id; t.video_bandwidth = work.video_bandwidth;
             t.video_width = work.video_width; t.video_height = work.video_height;
             t.audio_codec_id = work.audio_codec_id; t.audio_bandwidth = work.audio_bandwidth;
@@ -2319,8 +2220,10 @@ void DownloadManager::runTask(const std::string& id) {
     if (completed) {
         saveMetadata(work, true);
         writeReadme(work);
+        saveCollectionMetadata(work);
     } else if (!staleWorker) {
         saveMetadata(work, false);
+        saveCollectionMetadata(work);
     }
 
     saveState();

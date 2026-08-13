@@ -256,6 +256,12 @@ static DownloadTask makeCollectionDisplayTask(const std::vector<DownloadTask>& c
 
     display = children.front();
     display.id = "collection:" + downloadTaskGroupKey(children.front());
+    for (const auto& child : children) {
+        if (!child.series_cover_url.empty()) {
+            display.cover_url = child.series_cover_url;
+            break;
+        }
+    }
     display.title = children.front().series_title.empty() ? children.front().title : children.front().series_title;
     display.series_title = display.title;
     display.part_title.clear();

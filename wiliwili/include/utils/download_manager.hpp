@@ -50,7 +50,7 @@ enum class DownloadTaskStage {
 };
 
 struct DownloadTask {
-    int schema_version = 3;
+    int schema_version = 4;
     std::string id;
     std::string bvid;
     uint64_t cid = 0;
@@ -62,6 +62,9 @@ struct DownloadTask {
     int duration_seconds = 0;
     std::string owner_name;
     std::string cover_url;
+    // Stable cover for the logical collection/season. Individual UGC episodes can have
+    // their own cover_url while the parent folder keeps series_cover_url.
+    std::string series_cover_url;
     std::string source_page_url;
 
     int quality = 0;
@@ -115,7 +118,7 @@ inline void to_json(nlohmann::json& j, const DownloadTask& t) {
         {"schema_version", t.schema_version}, {"id", t.id}, {"bvid", t.bvid}, {"cid", t.cid}, {"aid", t.aid},
         {"title", t.title}, {"series_title", t.series_title}, {"part_title", t.part_title}, {"part_index", t.part_index},
         {"duration_seconds", t.duration_seconds}, {"owner_name", t.owner_name}, {"cover_url", t.cover_url},
-        {"source_page_url", t.source_page_url}, {"quality", t.quality}, {"quality_desc", t.quality_desc},
+        {"series_cover_url", t.series_cover_url}, {"source_page_url", t.source_page_url}, {"quality", t.quality}, {"quality_desc", t.quality_desc},
         {"video_codec_id", t.video_codec_id}, {"video_bandwidth", t.video_bandwidth}, {"video_width", t.video_width},
         {"video_height", t.video_height}, {"audio_id", t.audio_id}, {"audio_desc", t.audio_desc},
         {"audio_codec_id", t.audio_codec_id}, {"audio_bandwidth", t.audio_bandwidth}, {"is_dash", t.is_dash},
@@ -135,6 +138,7 @@ inline void from_json(const nlohmann::json& j, DownloadTask& t) {
     t.series_title = j.value("series_title", t.title); t.part_title = j.value("part_title", "");
     t.part_index = j.value("part_index", 0); t.duration_seconds = j.value("duration_seconds", 0);
     t.owner_name = j.value("owner_name", ""); t.cover_url = j.value("cover_url", "");
+    t.series_cover_url = j.value("series_cover_url", t.cover_url);
     t.source_page_url = j.value("source_page_url", ""); t.quality = j.value("quality", 0);
     t.quality_desc = j.value("quality_desc", ""); t.video_codec_id = j.value("video_codec_id", 0);
     t.video_bandwidth = j.value("video_bandwidth", 0u); t.video_width = j.value("video_width", 0);
@@ -154,7 +158,7 @@ inline void from_json(const nlohmann::json& j, DownloadTask& t) {
     t.video_file = j.value("video_file", ""); t.audio_file = j.value("audio_file", "");
     t.output_file = j.value("output_file", ""); t.muxed = j.value("muxed", false);
     t.created_at = j.value("created_at", int64_t{0}); t.finished_at = j.value("finished_at", int64_t{0});
-    t.schema_version = 3;
+    t.schema_version = 4;
     t.cancelFlag = std::make_shared<std::atomic<bool>>(false);
     t.pauseFlag = std::make_shared<std::atomic<bool>>(false);
 }
@@ -236,6 +240,7 @@ private:
     // so the manager resolves missing covers from each task BVID/AID exactly once at a time.
     std::mutex coverRequestMutex;
     std::unordered_set<std::string> coverRequests;
+    std::mutex coverFileMutex;
 
     int maxConcurrent() const;
     int64_t effectiveSpeedLimit() const;
@@ -245,6 +250,10 @@ private:
     void handleWorkerFailure(const std::string& id, const std::string& error);
     void runTask(const std::string& id);
     bool refreshSource(DownloadTask& task);
+    bool resolveTaskCover(DownloadTask& task);
+    bool downloadCoverAsset(const DownloadTask& task, const std::string& url, const std::string& path);
+    void saveCollectionMetadata(const DownloadTask& task);
+    void saveCollectionMetadataForParent(const std::string& parentDir);
     bool downloadDash(DownloadTask& task);
     bool downloadFlv(DownloadTask& task);
     bool concatFlvSegments(DownloadTask& task, const std::vector<std::string>& segmentFiles);

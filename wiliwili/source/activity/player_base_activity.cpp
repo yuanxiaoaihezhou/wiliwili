@@ -623,6 +623,7 @@ void BasePlayerActivity::showDownloadDialog() {
         base.duration_seconds = static_cast<int>(episodeResult.duration);
         base.owner_name = seasonInfo.up_info.uname;
         base.cover_url = seasonInfo.cover;
+        base.series_cover_url = seasonInfo.cover;
         base.source_page_url = episodeResult.link.empty()
             ? ("https://www.bilibili.com/bangumi/play/ep" + std::to_string(episodeResult.id))
             : episodeResult.link;
@@ -638,6 +639,9 @@ void BasePlayerActivity::showDownloadDialog() {
         base.duration_seconds = videoDetailPage.duration;
         base.owner_name = videoDetailResult.owner.name;
         base.cover_url = videoDetailResult.pic;
+        base.series_cover_url = videoDetailResult.ugc_season.cover.empty()
+                                    ? videoDetailResult.pic
+                                    : videoDetailResult.ugc_season.cover;
         base.source_page_url = "https://www.bilibili.com/video/" + videoDetailResult.bvid;
         if (videoDetailPage.page > 1) base.source_page_url += "?p=" + std::to_string(videoDetailPage.page);
     }
