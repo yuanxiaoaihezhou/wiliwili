@@ -726,7 +726,9 @@ void BasePlayerActivity::showDownloadDialog() {
                         task.part_title = ep.title.empty() ? ep.page.part : ep.title;
                         if (task.part_title.empty()) task.part_title = fmt::format("EP{}", index);
                         task.title = task.series_title + " - " + task.part_title;
-                        if (!videoDetailResult.ugc_season.cover.empty()) task.cover_url = videoDetailResult.ugc_season.cover;
+                        // UGC season episode records do not contain their own cover. Resolve each
+                        // BVID independently in DownloadManager instead of reusing one collection/current-video cover.
+                        task.cover_url.clear();
                         task.source_page_url = "https://www.bilibili.com/video/" + task.bvid;
                         task.estimated_bytes = DownloadManager::estimateBytes(task);
                         estimatedTotal += task.estimated_bytes;

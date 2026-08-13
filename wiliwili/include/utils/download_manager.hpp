@@ -184,6 +184,7 @@ public:
     bool getTaskSnapshot(const std::string& id, DownloadTask& out) const;
     bool hasIncompleteDownloads() const;
     bool hasCompletedTask(const std::string& bvid, uint64_t cid) const;
+    void ensureTaskCover(const DownloadTask& task);
 
     brls::Event<std::string>* getTaskProgressEvent() { return &taskProgressEvent; }
     brls::Event<std::string>* getTaskStatusChangedEvent() { return &taskStatusChangedEvent; }
@@ -230,6 +231,11 @@ private:
     // Prevent concurrent tasks from each independently claiming the same free space.
     std::mutex reservationMutex;
     std::unordered_map<std::string, int64_t> diskReservations;
+
+    // Cover hydration for batch/legacy tasks. UGC season episode records do not carry per-video covers,
+    // so the manager resolves missing covers from each task BVID/AID exactly once at a time.
+    std::mutex coverRequestMutex;
+    std::unordered_set<std::string> coverRequests;
 
     int maxConcurrent() const;
     int64_t effectiveSpeedLimit() const;

@@ -34,6 +34,7 @@
 #include "api/bilibili/util/http.hpp"
 #include "api/bilibili/util/uuid.hpp"
 #include "bilibili.h"
+#include "bilibili/result/video_detail_result.h"
 #include "utils/config_helper.hpp"
 #include "utils/download_transfer_policy.hpp"
 #include "utils/download_path_policy.hpp"
@@ -916,6 +917,55 @@ bool DownloadManager::hasCompletedTask(const std::string& bvid, uint64_t cid) co
     std::lock_guard<std::mutex> lock(tasksMutex);
     for (const auto& t : tasks) if (t.bvid == bvid && t.cid == cid && t.status == DownloadTaskStatus::COMPLETED) return true;
     return false;
+}
+
+
+void DownloadManager::ensureTaskCover(const DownloadTask& snapshot) {
+    if (!snapshot.cover_url.empty() || snapshot.id.empty()) return;
+    if (snapshot.bvid.empty() && snapshot.aid == 0) return;
+
+    {
+        std::lock_guard<std::mutex> lock(coverRequestMutex);
+        if (!coverRequests.insert(snapshot.id).second) return;
+    }
+
+    const auto id = snapshot.id;
+    auto finish = [this, id](const std::string& cover) {
+        DownloadTask updated;
+        bool changed = false;
+        if (!cover.empty() && !shuttingDown.load()) {
+            std::lock_guard<std::mutex> lock(tasksMutex);
+            auto it = std::find_if(tasks.begin(), tasks.end(),
+                                   [&](const DownloadTask& task) { return task.id == id; });
+            if (it != tasks.end() && it->cover_url.empty()) {
+                it->cover_url = cover;
+                updated = *it;
+                changed = true;
+            }
+        }
+        {
+            std::lock_guard<std::mutex> lock(coverRequestMutex);
+            coverRequests.erase(id);
+        }
+        if (!changed) return;
+
+        saveMetadata(updated, updated.status == DownloadTaskStatus::COMPLETED);
+        saveState();
+        brls::sync([this, id]() { taskStatusChangedEvent.fire(id); });
+    };
+
+    auto failure = [finish](const std::string&, int) { finish(std::string{}); };
+    if (!snapshot.bvid.empty()) {
+        BILI::get_video_detail(
+            snapshot.bvid,
+            [finish](const bilibili::VideoDetailResult& result) { finish(result.pic); },
+            failure);
+    } else {
+        BILI::get_video_detail(
+            snapshot.aid,
+            [finish](const bilibili::VideoDetailResult& result) { finish(result.pic); },
+            failure);
+    }
 }
 
 int DownloadManager::maxConcurrent() const { return concurrentLimit.load(); }

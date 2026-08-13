@@ -3,19 +3,19 @@
         wireframe="false"
         highlightCornerRadius="8"
         axis="column"
-        width="100%"
-        height="100%">
+        width="auto"
+        height="auto">
     <brls:Box
+            id="download/pic_box"
             width="100%"
-            height="168"
-            cornerRadius="8">
+            height="60%">
         <brls:Image
                 id="download/cover"
                 scalingType="fill"
                 height="100%"
                 width="100%"
                 image="@res/pictures/video-card-bg.png"
-                cornerRadius="8"/>
+                cornerRadius="4"/>
 
         <brls:Box
                 id="download/status_box"
@@ -23,10 +23,10 @@
                 positionTop="8"
                 positionRight="8"
                 cornerRadius="4"
-                paddingLeft="8"
-                paddingRight="8"
-                paddingTop="4"
-                paddingBottom="4"
+                paddingLeft="7"
+                paddingRight="7"
+                paddingTop="3"
+                paddingBottom="3"
                 backgroundColor="@theme/color/bilibili">
             <brls:Label
                     id="download/status"
@@ -37,79 +37,61 @@
         </brls:Box>
 
         <brls:Box
-                positionType="absolute"
                 positionBottom="0"
-                width="100%"
+                positionType="absolute"
                 background="vertical_linear"
                 paddingLeft="10"
                 paddingRight="10"
-                paddingTop="18"
-                paddingBottom="10"
-                axis="column">
-            <brls:Box width="100%" alignItems="center">
-                <brls:Label
-                        id="download/progress"
-                        textColor="#FFFFFF"
-                        fontSize="13"
-                        singleLine="true"
-                        width="75%"/>
-                <brls:Label
-                        id="download/percent"
-                        textColor="#FFFFFF"
-                        fontSize="14"
-                        horizontalAlign="right"
-                        singleLine="true"
-                        grow="1"/>
-            </brls:Box>
+                width="100%"
+                height="20%"
+                alignItems="center">
+            <brls:Label
+                    id="download/progress"
+                    textColor="#FFFFFF"
+                    fontSize="13"
+                    singleLine="true"
+                    width="72%"/>
+            <brls:Label
+                    id="download/percent"
+                    positionType="absolute"
+                    positionRight="10"
+                    textColor="#FFFFFF"
+                    fontSize="13"
+                    horizontalAlign="right"
+                    singleLine="true"/>
+        </brls:Box>
+
+        <brls:Box
+                positionType="absolute"
+                positionBottom="0"
+                width="100%"
+                height="3"
+                backgroundColor="#353535">
             <brls:Box
-                    marginTop="8"
-                    width="100%"
-                    height="4"
-                    backgroundColor="#3F3F3F"
-                    cornerRadius="2">
-                <brls:Box
-                        id="download/progress_bar"
-                        height="4"
-                        width="0%"
-                        backgroundColor="@theme/color/bilibili"
-                        cornerRadius="2"/>
-            </brls:Box>
+                    id="download/progress_bar"
+                    height="3"
+                    width="0%"
+                    backgroundColor="@theme/color/bilibili"/>
         </brls:Box>
     </brls:Box>
 
-    <brls:Box
-            width="100%"
-            grow="1"
-            paddingLeft="4"
-            paddingRight="4"
-            paddingTop="10"
-            paddingBottom="6"
-            axis="column">
+    <brls:Box margin="10" axis="column">
         <TextBox
                 id="download/title"
-                fontSize="18"
-                lineHeight="1.45"
+                fontSize="20"
+                lineHeight="1.5"
                 maxRows="2"
                 width="100%"
-                height="56"/>
-        <brls:Box
-                width="100%"
-                height="22"
-                alignItems="center"
-                marginTop="4">
-            <SVGImage
-                    id="download/up"
-                    height="14"
-                    width="18"
-                    SVG="@res/svg/widget-up.svg"/>
+                height="60"/>
+        <brls:Box width="100%" height="20" alignItems="center">
+            <SVGImage id="download/up" height="14" width="18" SVG="@res/svg/widget-up.svg"/>
             <brls:Label
                     id="download/meta"
-                    marginLeft="5"
-                    fontSize="14"
+                    marginLeft="4"
+                    fontSize="16"
                     singleLine="true"
                     textColor="@theme/font/grey"
-                    height="100%"
-                    grow="1"/>
+                    height="100%"/>
         </brls:Box>
     </brls:Box>
 </brls:Box>

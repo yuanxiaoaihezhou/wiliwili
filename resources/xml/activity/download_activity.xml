@@ -4,14 +4,14 @@
         footerHidden="false">
     <brls:Box backgroundColor="@theme/brls/background" axis="column" grow="1">
         <brls:Box
-                height="68"
+                height="64"
                 width="100%"
                 alignItems="center"
-                paddingLeft="28"
-                paddingRight="76">
+                paddingLeft="24"
+                paddingRight="72">
             <brls:Label
                     text="@i18n/wiliwili/download_manager/title"
-                    fontSize="26"
+                    fontSize="25"
                     grow="1"/>
             <brls:Label
                     id="download/summary"
@@ -19,23 +19,18 @@
                     textColor="@theme/font/grey"
                     horizontalAlign="right"
                     singleLine="true"
-                    width="52%"/>
+                    width="58%"/>
         </brls:Box>
         <RecyclingGrid
                 id="download/grid"
-                paddingLeft="24"
-                paddingRight="24"
-                paddingBottom="12"
+                paddingLeft="20"
+                paddingRight="20"
+                paddingBottom="8"
                 grow="1"
-                spanCount="@style/wiliwili/grid/span/4"
-                itemSpace="14"
                 preFetchLine="2"
-                flowMode="true"
-                itemHeight="318"
+                spanCount="@style/wiliwili/grid/span/4"
+                itemHeight="250"
                 wireframe="false"/>
-        <ButtonClose
-                positionType="absolute"
-                positionTop="2"
-                positionRight="2"/>
+        <ButtonClose positionType="absolute" positionTop="2" positionRight="2"/>
     </brls:Box>
 </brls:AppletFrame>

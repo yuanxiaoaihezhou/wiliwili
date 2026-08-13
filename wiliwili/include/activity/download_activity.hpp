@@ -68,7 +68,7 @@ private:
 
 class OfflinePlayerActivity : public brls::Activity {
 public:
-    CONTENT_FROM_XML_RES("activity/offline_player_activity.xml");
+    CONTENT_FROM_XML_RES("activity/video_activity.xml");
     explicit OfflinePlayerActivity(DownloadTask task) : task(std::move(task)) {}
     ~OfflinePlayerActivity() override;
     void onContentAvailable() override;
@@ -78,8 +78,7 @@ private:
     std::string subtitlePath;
     MPVEvent::Subscription mpvEventSubscription{};
     bool mpvEventSubscribed = false;
-    bool copyBackHwdec = false;
+    bool offlineHwdecOverridden = false;
     bool subtitleAttached = false;
-    BRLS_BIND(VideoView, video, "offline/video");
-    BRLS_BIND(brls::Label, title, "offline/title");
+    BRLS_BIND(VideoView, video, "video");
 };

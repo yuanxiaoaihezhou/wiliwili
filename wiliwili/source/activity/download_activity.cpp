@@ -111,11 +111,6 @@ static std::string selectOfflineSubtitle(const DownloadTask& task) {
     return candidates.front();
 }
 
-static std::string mpvFixedLengthPath(const std::string& path) {
-    // mpv's fixed-length syntax safely embeds commas/equals/quotes inside suboption values.
-    return "%" + std::to_string(path.size()) + "%" + path;
-}
-
 static std::string statusText(DownloadTaskStatus status) {
     switch (status) {
         case DownloadTaskStatus::PENDING: return "wiliwili/download_manager/status/queued"_i18n;
@@ -152,6 +147,11 @@ DownloadCard::~DownloadCard() { ImageHelper::clear(coverImage); }
 RecyclingGridItem* DownloadCard::create() { return new DownloadCard(); }
 
 void DownloadCard::prepareForReuse() {
+    // RecyclingGrid can reuse a card for another collection item with the same cover URL.
+    // Reset both the request and URL key; otherwise setTask() sees the same URL and leaves
+    // the placeholder image in place.
+    ImageHelper::clear(coverImage);
+    loadedCoverUrl.clear();
     coverImage->setImageFromRes("pictures/video-card-bg.png");
 }
 
@@ -354,6 +354,7 @@ void DownloadActivity::reload() {
     const auto free = DownloadManager::availableBytes(dir);
     summaryLabel->setText(dir + (free >= 0 ? " · " + "wiliwili/player/download/free_space"_i18n + ": " + humanBytes(free) : ""));
     auto tasks = DownloadManager::instance().getTasksSnapshot();
+    for (const auto& task : tasks) DownloadManager::instance().ensureTaskCover(task);
     // Preserve queue order for active/pending tasks so move-up/down is meaningful; completed items
     // are grouped below the queue by completion time.
     std::stable_sort(tasks.begin(), tasks.end(), [](const DownloadTask& a, const DownloadTask& b) {
@@ -381,6 +382,7 @@ void OfflineLibraryActivity::onContentAvailable() {
 
 void OfflineLibraryActivity::reload() {
     auto all = DownloadManager::instance().getTasksSnapshot();
+    for (const auto& task : all) DownloadManager::instance().ensureTaskCover(task);
     std::vector<DownloadTask> completed;
     for (auto& task : all) if (task.status == DownloadTaskStatus::COMPLETED) completed.emplace_back(std::move(task));
     std::stable_sort(completed.begin(), completed.end(), [](const auto& a, const auto& b) { return a.finished_at > b.finished_at; });
@@ -398,31 +400,44 @@ OfflinePlayerActivity::~OfflinePlayerActivity() {
         mpvEventSubscribed = false;
     }
 
-    // Stop the local file before this VideoView disappears. Otherwise libmpv keeps the last
-    // frame/file alive and a later online player can inherit local-file state unexpectedly.
-    MPVCore::instance().stop();
+    video->stop();
 
-    // Local playback uses copy-back decoding as a compatibility guard for libmpv's OpenGL FBO
-    // path on SteamOS/AMD. Restore the configured online-playback hwdec method on exit.
-    if (copyBackHwdec) {
-        MPVCore::instance().setHwdecCopyMode(false);
-        copyBackHwdec = false;
+    // Local playback is reliability-first and temporarily uses software decoding. Restore the
+    // user's configured online hwdec mode immediately when leaving the offline player.
+    if (offlineHwdecOverridden && MPVCore::HARDWARE_DEC) {
+        MPVCore::instance().command_async("set", "hwdec", MPVCore::PLAYER_HWDEC_METHOD);
+        brls::Logger::info("OfflinePlayer: restore hwdec={}", MPVCore::PLAYER_HWDEC_METHOD);
+        offlineHwdecOverridden = false;
     }
 }
 
 void OfflinePlayerActivity::onContentAvailable() {
-    title->setText(task.title);
-    video->registerCommonActions(this);
-    video->setTitle(task.title);
-    video->setQuality(task.quality_desc);
+    // Reuse the exact full-screen VideoView resource used by DLNA/live playback instead of
+    // maintaining a second custom player layout/render path.
     video->hideDLNAButton();
+    video->hideDanmakuButton();
     video->hideVideoQualityButton();
-    video->hideHistorySetting();
+    video->hideSubtitleSetting();
     video->hideVideoRelatedSetting();
+    video->hideHistorySetting();
     video->hideHighlightLineSetting();
     video->hideSkipOpeningCreditsSetting();
-    const auto profile = ProgramConfig::instance().getSettingItem(SettingItem::APP_UI_PROFILE, std::string{"auto"});
-    if (profile == "handheld" || profile == "tv") video->setTvControlMode(true);
+    video->disableCloseOnEndOfFile();
+    video->setFullscreenIcon(true);
+    video->setTitle(task.title);
+    video->showOSD(false);
+    video->registerCommonActions(this);
+
+    this->registerAction(
+        "cancel", brls::ControllerButton::BUTTON_B,
+        [this](brls::View*) -> bool {
+            if (video->isOSDLock())
+                video->toggleOSD();
+            else
+                brls::Application::popActivity();
+            return true;
+        },
+        true);
 
     const auto videoPath = DownloadManager::playableVideoPath(task);
     const auto audioPath = DownloadManager::playableAudioPath(task);
@@ -435,42 +450,46 @@ void OfflinePlayerActivity::onContentAvailable() {
     subtitleAttached = false;
 
     auto& mpv = MPVCore::instance();
-
-    // A local file can have a different codec/pixel format from the currently streamed file.
-    // Clear the previous file state first, then use copy-back hardware decoding for this activity.
-    // auto-copy/vaapi-copy still decodes in hardware but presents normal system-memory frames to
-    // libmpv's renderer, avoiding the direct interop path that produced a static grey frame on
-    // the SteamOS Legion Go while VLC rendered the same file correctly.
-    mpv.stop();
     mpv.reset();
+    mpv.setAspect(
+        ProgramConfig::instance().getSettingItem(SettingItem::PLAYER_ASPECT, std::string{"-1"}));
+
+    // Online playback proves the OpenGL renderer works on this SteamOS/Legion Go combination.
+    // The remaining grey-frame failure was local-media specific and survived auto-copy, so remove
+    // VAAPI/hwdec interop from the local path completely. The Z1 Extreme can software-decode the
+    // common 1080p AVC/HEVC/AV1 offline workload; online playback keeps the user's normal hwdec.
     if (MPVCore::HARDWARE_DEC) {
-        mpv.setHwdecCopyMode(true);
-        copyBackHwdec = true;
+        mpv.command_async("set", "hwdec", "no");
+        offlineHwdecOverridden = true;
+        brls::Logger::info("OfflinePlayer: temporarily disable hwdec for local playback");
     }
 
-    // Add subtitles only after the main media has reached FILE_LOADED. Keeping subtitle paths
-    // out of loadfile's comma-separated per-file options prevents a local subtitle/path parsing
-    // issue from affecting the primary video load. A separate DASH audio track still has to be
-    // attached as a per-file option so it starts in sync with the video file.
     mpvEventSubscription = MPV_E->subscribe([this](MpvEventEnum event) {
         if (event == MpvEventEnum::MPV_LOADED) {
             if (!subtitleAttached && !subtitlePath.empty()) {
                 MPVCore::instance().command_async("sub-add", subtitlePath, "select");
                 subtitleAttached = true;
             }
-            MPVCore::instance().resume();
+            video->resume();
         } else if (event == MpvEventEnum::MPV_FILE_ERROR) {
             brls::Application::notify("wiliwili/download_manager/play_missing"_i18n);
         }
     });
     mpvEventSubscribed = true;
 
-    std::string extra;
-    if (!audioPath.empty()) extra = "audio-file=" + mpvFixedLengthPath(audioPath);
+    brls::Logger::info(
+        "OfflinePlayer: video={}, external_audio={}, subtitle={}, hwdec=no",
+        cpr::fs::path(videoPath).filename().string(),
+        !audioPath.empty(),
+        !subtitlePath.empty());
 
-    brls::Logger::info("OfflinePlayer: video={}, external_audio={}, subtitle={}, copy_back_hwdec={}",
-                       cpr::fs::path(videoPath).filename().string(), !audioPath.empty(), !subtitlePath.empty(), copyBackHwdec);
-    mpv.setUrl(videoPath, extra);
-    mpv.resume();
+    // Use VideoView::setUrl(), the same established loading path as normal online playback.
+    if (audioPath.empty())
+        video->setUrl(videoPath, 0, 0);
+    else
+        video->setUrl(videoPath, 0, 0, audioPath);
+
+    video->resume();
+    brls::sync([this]() { brls::Application::giveFocus(video); });
 }
 
