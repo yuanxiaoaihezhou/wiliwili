@@ -1008,6 +1008,334 @@ void DownloadManager::ensureTaskCover(const DownloadTask& snapshot) {
     }
 }
 
+int DownloadManager::maxConcurrent() const { return concurrentLimit.load(); }
+
+int64_t DownloadManager::effectiveSpeedLimit() const {
+    const int64_t normal = normalSpeedLimit.load();
+    if (!playbackActive.load()) return normal;
+    const int64_t duringPlayback = playbackSpeedLimit.load();
+    if (duringPlayback <= 0) return normal;
+    if (normal <= 0) return duringPlayback;
+    return std::min(normal, duringPlayback);
+}
+void DownloadManager::ensureWorkers() {
+    if (!workerThreads.empty()) return;
+    workerThreads.reserve(4);
+    for (int i = 0; i < 4; ++i) workerThreads.emplace_back([this]() { workerLoop(); });
+}
+
+void DownloadManager::startNextTask() {
+    if (shuttingDown.load()) return;
+    workerCv.notify_all();
+}
+void DownloadManager::workerLoop() {
+    while (!shuttingDown.load()) {
+        std::string id;
+        {
+            std::lock_guard<std::mutex> lock(tasksMutex);
+            if (static_cast<int>(runningTasks.size()) < maxConcurrent()) {
+                auto it = std::find_if(tasks.begin(), tasks.end(), [&](const DownloadTask& task) {
+                    return task.status == DownloadTaskStatus::PENDING && runningTasks.count(task.id) == 0;
+                });
+                if (it != tasks.end()) {
+                    it->status = DownloadTaskStatus::DOWNLOADING;
+                    it->stage = DownloadTaskStage::REFRESHING_SOURCE;
+                    it->error_message.clear();
+                    runningTasks.insert(it->id);
+                    id = it->id;
+                }
+            }
+        }
+        if (id.empty()) {
+            std::unique_lock<std::mutex> waitLock(workerMutex);
+            workerCv.wait_for(waitLock, std::chrono::milliseconds(250));
+            continue;
+        }
+
+        saveState();
+        try {
+            runTask(id);
+        } catch (const std::exception& e) {
+            handleWorkerFailure(id, std::string("Download worker error: ") + e.what());
+        } catch (...) {
+            handleWorkerFailure(id, "Unexpected download worker error");
+        }
+    }
+}
+void DownloadManager::handleWorkerFailure(const std::string& id, const std::string& error) {
+    bool owned = false;
+    {
+        std::lock_guard<std::mutex> lock(tasksMutex);
+        owned = runningTasks.erase(id) > 0;
+        if (owned) {
+            for (auto& task : tasks) {
+                if (task.id != id) continue;
+                if (task.cancelFlag && task.cancelFlag->load()) task.status = DownloadTaskStatus::CANCELLED;
+                else if (task.pauseFlag && task.pauseFlag->load()) task.status = DownloadTaskStatus::PAUSED;
+                else {
+                    task.status = DownloadTaskStatus::FAILED;
+                    task.error_message = error;
+                }
+                break;
+            }
+        }
+    }
+    releaseDiskSpace(id);
+    if (!owned) return;
+    brls::Logger::error("DownloadManager: {}", error);
+    saveState();
+    if (!shuttingDown.load()) brls::sync([this, id]() { taskStatusChangedEvent.fire(id); });
+    startNextTask();
+}
+bool DownloadManager::throttleBytes(size_t bytes, std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag) {
+    if (bytes == 0) return true;
+    std::unique_lock<std::mutex> lock(throttleMutex);
+    while (!shuttingDown.load() && !cancelFlag.load() && !pauseFlag.load()) {
+        const int64_t limit = effectiveSpeedLimit();
+        const auto now = std::chrono::steady_clock::now();
+        if (limit <= 0) {
+            throttleTokens = 0.0;
+            throttleLastRefill = now;
+            return true;
+        }
+        const double elapsed = std::max(0.0, std::chrono::duration<double>(now - throttleLastRefill).count());
+        // A quarter-second bucket keeps the configured TOTAL rate smooth while still tolerating
+        // ordinary cpr callback chunk sizes. For very low limits, one chunk may be the capacity,
+        // but tokens start/refill at the configured byte rate so it still waits the correct time.
+        const double capacity = std::max<double>(static_cast<double>(bytes), static_cast<double>(limit) * 0.25);
+        throttleTokens = std::min(capacity, throttleTokens + elapsed * static_cast<double>(limit));
+        throttleLastRefill = now;
+        if (throttleTokens >= static_cast<double>(bytes)) {
+            throttleTokens -= static_cast<double>(bytes);
+            return true;
+        }
+        const double secondsNeeded = (static_cast<double>(bytes) - throttleTokens) / static_cast<double>(limit);
+        const auto waitFor = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::duration<double>(std::max(0.001, std::min(0.25, secondsNeeded))));
+        throttleCv.wait_for(lock, waitFor, [&]() {
+            return shuttingDown.load() || cancelFlag.load() || pauseFlag.load();
+        });
+    }
+    return false;
+}
+bool DownloadManager::reserveDiskSpace(const std::string& taskId, const std::string& path,
+                                       int64_t requiredBytes, int64_t& freeBytes) {
+    std::lock_guard<std::mutex> lock(reservationMutex);
+    freeBytes = availableBytes(path);
+    if (requiredBytes <= 0 || freeBytes < 0) {
+        diskReservations[taskId] = std::max<int64_t>(0, requiredBytes);
+        return true;
+    }
+    int64_t reservedByOthers = 0;
+    for (const auto& item : diskReservations) if (item.first != taskId) reservedByOthers += item.second;
+    if (freeBytes - reservedByOthers < requiredBytes) return false;
+    diskReservations[taskId] = requiredBytes;
+    return true;
+}
+void DownloadManager::releaseDiskSpace(const std::string& taskId) {
+    std::lock_guard<std::mutex> lock(reservationMutex);
+    diskReservations.erase(taskId);
+}
+void DownloadManager::updateLiveProgress(const std::string& taskId, int64_t downloaded, int64_t total, bool audioPart) {
+    {
+        std::lock_guard<std::mutex> lock(tasksMutex);
+        for (auto& t : tasks) if (t.id == taskId) {
+            if (audioPart) { t.audio_downloaded_bytes = downloaded; t.audio_total_bytes = total; }
+            else { t.downloaded_bytes = downloaded; t.total_bytes = total; }
+            break;
+        }
+    }
+    if (!shuttingDown.load()) brls::sync([this, taskId]() { taskProgressEvent.fire(taskId); });
+}
+
+void DownloadManager::updateStage(const std::string& taskId, DownloadTaskStage stage, const std::string& error) {
+    {
+        std::lock_guard<std::mutex> lock(tasksMutex);
+        for (auto& t : tasks) if (t.id == taskId) {
+            t.stage = stage;
+            if (!error.empty()) t.error_message = error;
+            break;
+        }
+    }
+    if (!shuttingDown.load()) brls::sync([this, taskId]() { taskStatusChangedEvent.fire(taskId); });
+}
+bool DownloadManager::downloadFile(const std::string& url, const std::string& filepath,
+                                   std::atomic<bool>& cancelFlag, std::atomic<bool>& pauseFlag,
+                                   int64_t& downloadedBytes, int64_t& totalBytes,
+                                   const std::string& taskId, bool audioPart) {
+    int64_t existing = 0;
+    try { if (cpr::fs::exists(filepath)) existing = static_cast<int64_t>(cpr::fs::file_size(filepath)); } catch (...) {}
+    if (existing > 0 && totalBytes > 0 && existing >= totalBytes) {
+        // A complete-sized file no longer needs its transport validator. Integrity is checked by
+        // ffprobe before completion; if that fails verifyTaskMedia() quarantines it for redownload.
+        try {
+            const auto staleResumeMeta = filepath + ".resume.json";
+            if (cpr::fs::exists(staleResumeMeta)) cpr::fs::remove(staleResumeMeta);
+        } catch (...) {}
+        downloadedBytes = existing;
+        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+        return true;
+    }
+    const auto tempPath = filepath + ".request.part";
+    const auto resumeMetaPath = filepath + ".resume.json";
+    std::string resumeValidator;
+    if (existing > 0 && cpr::fs::exists(resumeMetaPath)) {
+        try {
+            std::ifstream rf(resumeMetaPath);
+            nlohmann::json resume; rf >> resume;
+            resumeValidator = resume.value("validator", "");
+        } catch (...) {}
+    }
+    std::ofstream ofs(tempPath, std::ios::binary | std::ios::trunc);
+    if (!ofs.is_open()) return false;
+    int64_t requestBytes = 0;
+    downloadedBytes = existing;
+    updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+    auto lastFire = std::chrono::steady_clock::now();
+    auto session = bilibili::HTTP::createSession();
+    session->SetUrl(cpr::Url{url});
+    auto headers = bilibili::HTTP::HEADERS;
+    if (existing > 0) {
+        headers["Range"] = fmt::format("bytes={}-", existing);
+        if (!resumeValidator.empty()) headers["If-Range"] = resumeValidator;
+    }
+    session->SetHeader(headers);
+    session->SetTimeout(cpr::Timeout{0});
+    session->SetWriteCallback(cpr::WriteCallback([&](std::string data, intptr_t) -> bool {
+        if (cancelFlag.load() || pauseFlag.load() || shuttingDown.load()) return false;
+        // One shared token bucket enforces the configured TOTAL background-download speed across
+        // all concurrent workers. Sleeping inside the write callback naturally back-pressures cpr.
+        if (!throttleBytes(data.size(), cancelFlag, pauseFlag)) return false;
+        ofs.write(data.data(), static_cast<std::streamsize>(data.size()));
+        if (!ofs.good()) return false;
+        requestBytes += static_cast<int64_t>(data.size());
+        downloadedBytes = existing + requestBytes;
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration<double>(now - lastFire).count() >= 0.25) {
+            lastFire = now;
+            updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+        }
+        return true;
+    }));
+    session->SetProgressCallback(cpr::ProgressCallback([&](cpr::cpr_pf_arg_t dltotal, cpr::cpr_pf_arg_t,
+                                                     cpr::cpr_pf_arg_t, cpr::cpr_pf_arg_t, intptr_t) -> bool {
+        if (dltotal > 0) totalBytes = existing + static_cast<int64_t>(dltotal);
+        return !cancelFlag.load() && !pauseFlag.load() && !shuttingDown.load();
+    }));
+    auto response = session->Get();
+    ofs.close();
+    std::string responseValidator = responseHeader(response, "etag");
+    if (responseValidator.empty()) responseValidator = responseHeader(response, "last-modified");
+    auto saveResumeValidator = [&](const std::string& validator) {
+        try {
+            if (validator.empty()) {
+                if (cpr::fs::exists(resumeMetaPath)) cpr::fs::remove(resumeMetaPath);
+                return;
+            }
+            std::ofstream meta(resumeMetaPath, std::ios::trunc);
+            if (meta.is_open()) meta << nlohmann::json{{"validator", validator}}.dump();
+        } catch (...) {}
+    };
+    auto clearResumeValidator = [&]() {
+        try { if (cpr::fs::exists(resumeMetaPath)) cpr::fs::remove(resumeMetaPath); } catch (...) {}
+    };
+    const bool rangeResponse = response.status_code == 206;
+    const bool rangeValid = rangeResponse && responseRangeStartsAt(response, existing);
+    auto appendTemp = [&]() -> bool {
+        if (!rangeValid) return false;
+        std::ifstream in(tempPath, std::ios::binary);
+        std::ofstream out(filepath, std::ios::binary | std::ios::app);
+        if (!in.is_open() || !out.is_open()) return false;
+        out << in.rdbuf();
+        in.close(); out.close();
+        if (!out.good()) return false;
+        cpr::fs::remove(tempPath);
+        downloadedBytes = existing + requestBytes;
+        saveResumeValidator(!responseValidator.empty() ? responseValidator : resumeValidator);
+        return true;
+    };
+    if (cancelFlag.load() || pauseFlag.load() || shuttingDown.load()) {
+        try {
+            if (requestBytes > 0) {
+                if (rangeValid) {
+                    appendTemp();
+                } else if (existing == 0) {
+                    if (!moveReplace(tempPath, filepath)) throw std::runtime_error("cannot preserve partial file");
+                    downloadedBytes = requestBytes;
+                    saveResumeValidator(responseValidator);
+                } else {
+                    // Never append an unvalidated 206 or an ignored-Range HTTP 200 to an existing
+                    // partial. Keep the old verified prefix and discard only this unsafe chunk.
+                    cpr::fs::remove(tempPath);
+                    downloadedBytes = existing;
+                }
+            } else if (cpr::fs::exists(tempPath)) {
+                cpr::fs::remove(tempPath);
+            }
+        } catch (const std::exception& e) {
+            brls::Logger::error("DownloadManager: preserving partial file failed: {}", e.what());
+        }
+        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+        return false;
+    }
+    if (response.error || (response.status_code != 200 && response.status_code != 206)) {
+        try {
+            const bool mediaStatus = response.status_code == 200 || response.status_code == 206;
+            if (requestBytes > 0 && mediaStatus) {
+                if (rangeValid) {
+                    appendTemp();
+                } else if (response.status_code == 200 && existing == 0) {
+                    // A transport error can still leave a useful prefix of a normal HTTP 200 body.
+                    // Never persist HTTP error pages or an unvalidated 206 response as media.
+                    if (moveReplace(tempPath, filepath)) {
+                        downloadedBytes = requestBytes;
+                        saveResumeValidator(responseValidator);
+                    }
+                } else if (cpr::fs::exists(tempPath)) {
+                    cpr::fs::remove(tempPath);
+                }
+            } else if (cpr::fs::exists(tempPath)) {
+                cpr::fs::remove(tempPath);
+            }
+        } catch (...) {}
+        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+        brls::Logger::error("DownloadManager: media request to {} failed, HTTP {}, {}",
+                            urlHost(url), response.status_code, response.error.message);
+        return false;
+    }
+    // RFC-compliant 206 responses must describe the exact returned range. A CDN/source switch can
+    // otherwise make a syntactically successful resume silently corrupt the media file.
+    if (rangeResponse && !rangeValid) {
+        brls::Logger::warning("DownloadManager: invalid Content-Range from {}; restarting track from byte 0", urlHost(url));
+        try {
+            if (cpr::fs::exists(tempPath)) cpr::fs::remove(tempPath);
+            if (cpr::fs::exists(filepath)) cpr::fs::remove(filepath);
+            clearResumeValidator();
+        } catch (...) {}
+        downloadedBytes = 0;
+        totalBytes = 0;
+        updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+        return false;
+    }
+    try {
+        if (rangeValid) {
+            if (!appendTemp()) throw std::runtime_error("cannot append validated Range response");
+        } else {
+            // HTTP 200 after a Range request means the server ignored Range and sent a full body.
+            // Atomically replace the old partial rather than duplicating bytes.
+            if (!moveReplace(tempPath, filepath)) throw std::runtime_error("cannot finalize downloaded file");
+            downloadedBytes = requestBytes;
+            totalBytes = requestBytes;
+        }
+        clearResumeValidator();
+    } catch (const std::exception& e) {
+        brls::Logger::error("DownloadManager: finalizing file failed: {}", e.what());
+        return false;
+    }
+    updateLiveProgress(taskId, downloadedBytes, totalBytes, audioPart);
+    return true;
+}
+
 bool DownloadManager::resolveTaskCover(DownloadTask& task) {
     if (!task.cover_url.empty()) {
         if (task.series_cover_url.empty()) task.series_cover_url = task.cover_url;
