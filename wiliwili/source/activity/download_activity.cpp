@@ -490,6 +490,6 @@ void OfflinePlayerActivity::onContentAvailable() {
         video->setUrl(videoPath, 0, 0, audioPath);
 
     video->resume();
-    brls::sync([this]() { brls::Application::giveFocus(video); });
+    brls::Application::giveFocus(video);
 }
 
